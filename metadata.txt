@@ -1,0 +1,18 @@
+[general]
+name=Model Forge
+qgisMinimumVersion=3.28
+description=Generate QGIS Processing models from natural language descriptions using LLM pattern matching
+version=0.1
+author=Wolren
+email=wolrenn@outlook.com
+
+about=Model Forge lets you describe a geoprocessing workflow in plain text and generates a ready-to-use QGIS Graphical Model (.model3) that you can immediately open, inspect and tweak in Model Designer. It recognises common GIS patterns (clip + dissolve + statistics, raster reclassification + zonal stats, buffer + intersection, etc.) and emits proper model definitions with inputs, algorithms and wired connections. Supports both local LLMs via Ollama and remote APIs (OpenAI-compatible). Models are saved to your Processing models folder and appear in the Toolbox instantly.
+
+tracker=https://github.com/wolren/model-forge/issues
+repository=https://github.com/wolren/model-forge
+tags=model,processing,ai,llm,automation,workflow,modeler
+homepage=https://github.com/wolren/model-forge
+category=Analysis
+icon=icon.png
+experimental=True
+deprecated=False
