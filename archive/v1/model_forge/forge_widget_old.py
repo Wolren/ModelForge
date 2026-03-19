@@ -7,10 +7,8 @@ Model Forge main widget: Generate / Model / Settings tabs.
 - Open in Model Designer
 """
 
-import os
 import json
 import re
-import traceback
 
 from qgis.PyQt.QtCore import Qt, QThread, pyqtSignal, QObject, QSettings
 from qgis.PyQt.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
@@ -23,10 +21,10 @@ from qgis.PyQt.QtWidgets import (
 )
 from qgis.core import QgsProject
 
-from v4.model_forge.llm_backend import LLMBackend
-from v4.model_forge.model_builder import ModelBuilder
-from v4.model_forge.model_layout import compute_layout
-from v4.model_forge.context_collector import ContextCollector
+from model_forge.llm_backend import LLMBackend
+from model_forge.model_builder import ModelBuilder
+from model_forge.model_layout import compute_layout
+from model_forge.context_collector import ContextCollector
 
 SETTINGS_PREFIX = "ModelForge/"
 

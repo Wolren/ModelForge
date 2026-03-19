@@ -1,7 +1,7 @@
 [general]
 name=Model Forge
 qgisMinimumVersion=3.28
-description=Generate QGIS Processing models from natural language using LLM pattern matching with registry-aware validation
+description=Generate QGIS Models from natural language using LLM pattern matching with registry-aware validation
 version=0.4
 author=Wolren
 email=wolrenn@outlook.com
