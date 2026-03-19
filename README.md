@@ -1,5 +1,10 @@
 # Model Forge
 
+![Model Forge icon](model_forge/icon.png)
+
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: GPLv2 or later](https://img.shields.io/badge/License-GPLv2%2B-green.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
+
 Model Forge is a QGIS plugin that helps you turn plain‑language descriptions of GIS workflows into editable Processing models. It is designed to make it easier to prototype, inspect and refine multi‑step geoprocessing without building every model node by hand.
 
 ---
@@ -15,7 +20,7 @@ Model Forge is a QGIS plugin that helps you turn plain‑language descriptions o
 ### Generate a model from text
 
 1. Go to the **Generate** tab.
-2. In **Describe your workflow**, write what you want to do, for example:
+2. In **Describe your workflow**, write what you want to do, for example:  
    “Buffer input points by 500 m, clip with the city boundary, then compute mean population per buffer.”
 3. Optionally:
    - Set a **Name** and **Group** for the model.
@@ -36,7 +41,7 @@ In the **Model** tab:
 ### Debug and improve
 
 - **Auto‑Repair (validation)** validates the current JSON structure and sends a repair request to the LLM if issues are found.
-- **Send repair prompt** lets you describe what to fix or improve (for example “add dissolve after clip” or “change the field name to `pop_2020`”).
+- **Send repair prompt** lets you describe what to fix or improve (for example “add dissolve after clip” or “change the field name to `pop_2020`”).  
   The plugin sends the current JSON plus your feedback to the LLM and updates the model JSON with the result.
 
 ### Backend settings
@@ -56,25 +61,25 @@ In the **Settings** tab:
 
 Key files and modules:
 
-- `model_forge.py`
+- `model_forge.py`  
   QGIS plugin entry point. Registers the plugin, adds the toolbar/menu actions, and creates the main dock widget.
-- `forge_dock.py`
+- `forge_dock.py`  
   Dock widget wrapper that embeds the main `ForgeWidget` into a QGIS dock.
-- `forge_widget.py`
+- `forge_widget.py`  
   Main UI logic. Implements the Generate / Model / Settings tabs, wiring between buttons, LLM backend, context collector and model builder.
-- `llm_backend.py`
-  Thin abstraction over one or more LLM backends. Handles configuration (provider, URL, API key, model) and exposes methods:
-  - `generate_single_pass(description, name, group, context_text)`
-  - `generate_plan(description, context_text)`
-  - `generate_model_from_plan(plan, context_text)`
+- `llm_backend.py`  
+  Thin abstraction over one or more LLM backends. Handles configuration (provider, URL, API key, model) and exposes methods:  
+  - `generate_single_pass(description, name, group, context_text)`  
+  - `generate_plan(description, context_text)`  
+  - `generate_model_from_plan(plan, context_text)`  
   - `repair_model(workflow_json, errors, context_text)`
-- `context_collector.py`
+- `context_collector.py`  
   Collects information about the current project and Processing algorithms to send as textual context to the LLM. Supports limiting the number of algorithms and selecting providers.
-- `model_builder.py`
+- `model_builder.py`  
   Converts the workflow JSON into a `QgsProcessingModelAlgorithm`, creates inputs, algorithm components and connections.
-- `model_layout.py`
+- `model_layout.py`  
   Computes positions for inputs and algorithm components (simple DAG layout) so the model opens in the Model Designer with a readable arrangement.
-- `resources.qrc` / generated `resources_rc.py`
+- `resources.qrc` / generated `resources_rc.py`  
   Icon and other static assets.
 
 ### Threads and background work
@@ -106,12 +111,23 @@ The plugin expects and produces a simple JSON structure:
   - `"algorithm_id"`: Processing provider id (e.g. `native:buffer`),
   - `"parameters"`: mapping of parameter name to values or references.
 - Child outputs are expressed as:
+
   ```json
   { "type": "child_output", "child_id": "some_step_id" }
   ```
+
   and are used to build connections between model components.
 
 `_validate_model` in `forge_widget.py` performs basic structural checks (missing keys, duplicate ids, invalid child references) before attempting repair.
+
+### Extending the plugin
+
+Typical extension points:
+
+- Add new backends to `LLMBackend.BACKENDS` and implement the corresponding API client methods.
+- Adjust layout rules in `model_layout.py` to change how models are placed in the Designer.
+- Enhance `ContextCollector` to include additional metadata (layer fields, CRS, statistics) in the LLM prompt.
+- Add more validation rules or domain‑specific checks in `_validate_model` and `ModelBuilder`.
 
 ### Extending the plugin
 
