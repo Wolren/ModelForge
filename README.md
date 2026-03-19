@@ -1,11 +1,9 @@
-# Model Forge
-
-![Model Forge icon](model_forge/icon.png)
+# Model Forge ![Model Forge icon](model_forge/icon.png)
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: GPLv2 or later](https://img.shields.io/badge/License-GPLv2%2B-green.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
 
-Model Forge is a QGIS plugin that helps you turn plain‑language descriptions of GIS workflows into editable Processing models. It is designed to make it easier to prototype, inspect and refine multi‑step geoprocessing without building every model node by hand.
+Model Forge is a QGIS plugin that helps you turn plain‑language descriptions of GIS workflows into editable Models. It is designed to make it easier to prototype, inspect and refine multi‑step geoprocessing without building every model node by hand.
 
 ---
 
@@ -119,15 +117,6 @@ The plugin expects and produces a simple JSON structure:
   and are used to build connections between model components.
 
 `_validate_model` in `forge_widget.py` performs basic structural checks (missing keys, duplicate ids, invalid child references) before attempting repair.
-
-### Extending the plugin
-
-Typical extension points:
-
-- Add new backends to `LLMBackend.BACKENDS` and implement the corresponding API client methods.
-- Adjust layout rules in `model_layout.py` to change how models are placed in the Designer.
-- Enhance `ContextCollector` to include additional metadata (layer fields, CRS, statistics) in the LLM prompt.
-- Add more validation rules or domain‑specific checks in `_validate_model` and `ModelBuilder`.
 
 ### Extending the plugin
 
