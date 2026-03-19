@@ -1,6 +1,4 @@
-# Model Forge
-
-![Model Forge icon](model_forge/icon.png)
+# Model Forge ![Model Forge icon](model_forge/icon.png)
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: GPLv2 or later](https://img.shields.io/badge/License-GPLv2%2B-green.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
