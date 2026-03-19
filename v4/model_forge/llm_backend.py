@@ -148,7 +148,7 @@ class LLMBackend:
         "ollama": {
             "label": "Ollama (Local)",
             "default_url": "http://localhost:11434",
-            "default_model": "qwen2.5-coder:7b",
+            "default_model": "gpt-oss:20b-cloud",
         },
         "openai": {
             "label": "OpenAI",
@@ -181,7 +181,7 @@ class LLMBackend:
         self.backend = "ollama"
         self.url = "http://localhost:11434"
         self.api_key = ""
-        self.model = "qwen2.5-coder:7b"
+        self.model = ""
         self.temperature = 0.2
 
     def configure(self, backend="ollama", url="", api_key="", model="", temperature=0.2):
@@ -366,8 +366,6 @@ class LLMBackend:
                 raise ValueError("Error calling LLM API: " + str(e))
 
         raise ValueError("LLM API failed after " + str(attempts) + " retries: " + str(last_error))
-
-    # ── Forgiving JSON parser ─────────────────────────────────
 
     def _parse_json_response(self, text):
         """

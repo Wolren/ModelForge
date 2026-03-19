@@ -18,7 +18,7 @@ class ModelForge:
         return QCoreApplication.translate('ModelForge', message)
 
     def initGui(self):
-        icon_path = os.path.join(self.plugin_dir, 'icon.png')
+        icon_path = os.path.join(self.plugin_dir, 'icon_old.png')
         icon = QIcon(icon_path) if os.path.exists(icon_path) else QIcon.fromTheme('panel-show')
         self.action_open = QAction(icon, self.tr(u'Model Forge'), self.iface.mainWindow())
         self.action_open.setStatusTip(self.tr('Open Model Forge panel'))

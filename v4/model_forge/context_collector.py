@@ -229,12 +229,6 @@ class ContextCollector:
         return text
 
     def collect(self, layers=None, algo_config=None, max_chars=8000):
-        """
-        Backwards-compatible helper used by the new ForgeWidget.
-        layers: list of QgsMapLayer objects (may be None)
-        algo_config: dict with keys like 'max_algorithms', 'include_native', etc. (may be None)
-        Returns: context text string for the LLM.
-        """
         selected_ids = None
         if layers:
             selected_ids = [lyr.id() for lyr in layers]

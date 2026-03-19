@@ -18,6 +18,6 @@ class ForgeDock(QDockWidget):
         main_widget.setLayout(layout)
         self.setWidget(main_widget)
 
-    def closeEvent(self, event):
+    def closeEvent(self, event, **kwargs):
         self.forge_widget.disconnect_signals()
         event.accept()

@@ -7,28 +7,31 @@ Model Forge main widget: Generate / Model / Settings tabs.
 - Open in Model Designer
 """
 
+import os
 import json
 import re
 import traceback
 
-from qgis.PyQt.QtCore import Qt, QThread, pyqtSignal, QSettings
+from qgis.PyQt.QtCore import Qt, QThread, pyqtSignal, QObject, QSettings
 from qgis.PyQt.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
 from qgis.PyQt.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QPushButton, QCheckBox, QListWidget, QListWidgetItem,
     QTextEdit, QLineEdit, QComboBox,
     QMessageBox, QTabWidget, QAbstractItemView, QSlider,
-    QSpinBox, QFileDialog, QGridLayout, QProgressBar,
+    QSpinBox, QFileDialog, QGridLayout,
 )
 from qgis.core import QgsProject
 
-from .context_collector import ContextCollector
-from .llm_backend import LLMBackend
-from .model_builder import ModelBuilder
-from .model_layout import compute_layout
+from v4.model_forge.llm_backend import LLMBackend
+from v4.model_forge.model_builder import ModelBuilder
+from v4.model_forge.model_layout import compute_layout
+from v4.model_forge.context_collector import ContextCollector
 
 SETTINGS_PREFIX = "ModelForge/"
 
+
+# ── JSON syntax highlighter (from v3) ────────────────────────
 
 class JsonHighlighter(QSyntaxHighlighter):
 
@@ -80,58 +83,44 @@ class JsonHighlighter(QSyntaxHighlighter):
             self.setFormat(m.start(), 1, self.fmt_bracket)
 
 
-class GenerateWorker(QThread):
-    finished = pyqtSignal(dict)
-    error = pyqtSignal(str)
-    progress = pyqtSignal(str)
+# ── Background worker for LLM calls ──────────────────────────
 
-    def __init__(self, backend, description, model_name, model_group, context_text, two_phase=False):
+class LLMWorker(QObject):
+    finished = pyqtSignal(object)
+    error = pyqtSignal(str, str)  # (message, raw_response_or_empty)
+
+    def __init__(self, func, *args):
         super().__init__()
-        self.backend = backend
-        self.description = description
-        self.model_name = model_name
-        self.model_group = model_group
-        self.context_text = context_text
-        self.two_phase = two_phase
+        self.func = func
+        self.args = args
+        self._cancelled = False
 
     def run(self):
+        if self._cancelled:
+            return
         try:
-            if self.two_phase:
-                self.progress.emit("Phase 1/2: Generating high-level plan...")
-                plan = self.backend.generate_plan(self.description, self.context_text)
-                self.progress.emit("Phase 2/2: Converting plan to model definition...")
-                result = self.backend.generate_model_from_plan(plan, self.context_text)
-                result["_plan"] = plan
-            else:
-                self.progress.emit("Generating model definition (single pass)...")
-                result = self.backend.generate_single_pass(
-                    self.description, self.model_name, self.model_group, self.context_text
-                )
-            self.finished.emit(result)
+            result = self.func(*self.args)
+            if not self._cancelled:
+                self.finished.emit(result)
+        except ValueError as e:
+            if not self._cancelled:
+                msg = str(e)
+                raw = ""
+                if "Raw response snippet:" in msg:
+                    parts = msg.split("Raw response snippet:\n\n", 1)
+                    msg = parts[0].strip()
+                    raw = parts[1] if len(parts) > 1 else ""
+                self.error.emit(msg, raw)
         except Exception as e:
-            self.error.emit(str(e) + "\n\n" + traceback.format_exc())
+            if not self._cancelled:
+                self.error.emit(str(e), "")
 
-
-class RepairWorker(QThread):
-    finished = pyqtSignal(dict)
-    error = pyqtSignal(str)
-
-    def __init__(self, backend, workflow_json, errors, context_text):
-        super().__init__()
-        self.backend = backend
-        self.workflow_json = workflow_json
-        self.errors = errors
-        self.context_text = context_text
-
-    def run(self):
-        try:
-            result = self.backend.repair_model(self.workflow_json, self.errors, self.context_text)
-            self.finished.emit(result)
-        except Exception as e:
-            self.error.emit(str(e))
+    def cancel(self):
+        self._cancelled = True
 
 
 class ForgeWidget(QWidget):
+    """Main Model Forge widget with Generate + Model + Settings tabs."""
 
     def __init__(self, iface, parent=None):
         super().__init__(parent)
@@ -139,16 +128,17 @@ class ForgeWidget(QWidget):
         self.context_collector = ContextCollector()
         self.backend = LLMBackend()
         self.builder = ModelBuilder()
+        self.worker = None
+        self.thread = None
         self._current_model_json = None
         self.current_model = None
-        self.current_context_text = ""
         self._designer_dlg = None
-        self.worker = None
-
         self._load_settings()
         self._init_ui()
         self._load_layers()
         self._connect_project_signals()
+
+    # ── UI Construction ───────────────────────────────────────
 
     def _init_ui(self):
         main_layout = QVBoxLayout()
@@ -167,6 +157,13 @@ class ForgeWidget(QWidget):
 
         self.setLayout(main_layout)
 
+    # ── Generate Tab ──────────────────────────────────────────
+    #
+    # HEIGHT CONTROLS:
+    #   self.txt_description.setMinimumHeight(N)  -> minimum height of the description box
+    #   self.txt_description.setMaximumHeight(N)  -> maximum height of the description box
+    #   self.layer_list.setMaximumHeight(N)       -> height of the context layers list
+
     def _create_generate_tab(self):
         tab = QWidget()
         layout = QVBoxLayout()
@@ -179,8 +176,8 @@ class ForgeWidget(QWidget):
             "e.g. Buffer input points by 500m, clip with boundary polygon, "
             "then calculate area statistics..."
         )
-        self.txt_description.setMinimumHeight(160)
-        self.txt_description.setMaximumHeight(220)
+        self.txt_description.setMinimumHeight(160)   # ← adjust this for min height
+        self.txt_description.setMaximumHeight(220)   # ← adjust this for max height
         desc_layout.addWidget(self.txt_description)
         desc_group.setLayout(desc_layout)
         layout.addWidget(desc_group)
@@ -199,7 +196,7 @@ class ForgeWidget(QWidget):
         layers_layout.setSpacing(4)
         self.layer_list = QListWidget()
         self.layer_list.setSelectionMode(QAbstractItemView.MultiSelection)
-        self.layer_list.setMaximumHeight(120)
+        self.layer_list.setMaximumHeight(120)        # ← adjust this for layer list height
         layers_layout.addWidget(self.layer_list)
 
         sel_btn_layout = QHBoxLayout()
@@ -222,15 +219,10 @@ class ForgeWidget(QWidget):
         )
         layout.addWidget(self.chk_two_phase)
 
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0)
-        self.progress_bar.hide()
-        layout.addWidget(self.progress_bar)
+        # Generate / Cancel buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
 
-        self.lbl_status = QLabel("")
-        layout.addWidget(self.lbl_status)
-
-        # Generate button (no cancel — v3 style)
         self.btn_generate = QPushButton("Generate Model")
         self.btn_generate.setStyleSheet(
             "QPushButton { background-color: #4CAF50; color: white; "
@@ -238,26 +230,35 @@ class ForgeWidget(QWidget):
             "QPushButton:hover { background-color: #45a049; }"
         )
         self.btn_generate.clicked.connect(self._on_generate)
-        layout.addWidget(self.btn_generate)
+        btn_layout.addWidget(self.btn_generate)
 
-        self.lbl_context_info = QLabel("")
-        self.lbl_context_info.setWordWrap(True)
-        self.lbl_context_info.setStyleSheet("color: gray; font-size: 10px;")
-        layout.addWidget(self.lbl_context_info)
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.setEnabled(False)
+        self.btn_cancel.clicked.connect(self._on_cancel)
+        btn_layout.addWidget(self.btn_cancel)
+        layout.addLayout(btn_layout)
 
         layout.addStretch()
         tab.setLayout(layout)
         return tab
+
+    # ── Model Tab (Debug / Improve) ───────────────────────────
+    #
+    # HEIGHT CONTROLS:
+    #   The JSON editor uses stretch=3 in addWidget so it expands to fill space.
+    #   self.txt_improve_prompt.setMaximumHeight(N)  -> height of the improve prompt box
 
     def _create_model_tab(self):
         tab = QWidget()
         layout = QVBoxLayout()
         layout.setSpacing(6)
 
+        # Validation label
         self.lbl_validity = QLabel("No model generated yet.")
         self.lbl_validity.setWordWrap(True)
         layout.addWidget(self.lbl_validity)
 
+        # JSON editor — dark themed with syntax highlighting
         layout.addWidget(QLabel("Model JSON (editable):"))
         self.txt_model_json = QTextEdit()
         self.txt_model_json.setStyleSheet(
@@ -268,8 +269,9 @@ class ForgeWidget(QWidget):
         font.setStyleHint(QFont.Monospace)
         self.txt_model_json.setFont(font)
         self.highlighter = JsonHighlighter(self.txt_model_json.document())
-        layout.addWidget(self.txt_model_json, stretch=3)
+        layout.addWidget(self.txt_model_json, stretch=3)  # ← stretch=3 makes it fill space
 
+        # Button row: Rebuild + Save + Open in Designer
         btn_row = QHBoxLayout()
 
         self.btn_rebuild = QPushButton("Rebuild model from JSON above")
@@ -289,6 +291,7 @@ class ForgeWidget(QWidget):
 
         layout.addLayout(btn_row)
 
+        # Debug / Improve section
         improve_group = QGroupBox("Debug / Improve")
         improve_layout = QVBoxLayout()
         improve_layout.setSpacing(4)
@@ -298,7 +301,7 @@ class ForgeWidget(QWidget):
             "Describe what to fix, improve, or add to the current model...\n"
             "e.g. 'Add a dissolve step after the buffer' or 'Fix the field name to population'"
         )
-        self.txt_improve_prompt.setMaximumHeight(100)
+        self.txt_improve_prompt.setMaximumHeight(100)  # ← adjust this for improve prompt height
         improve_layout.addWidget(self.txt_improve_prompt)
 
         improve_btn_layout = QHBoxLayout()
@@ -319,7 +322,10 @@ class ForgeWidget(QWidget):
         layout.addWidget(improve_group)
 
         tab.setLayout(layout)
+
         return tab
+
+    # ── Settings Tab ──────────────────────────────────────────
 
     def _create_settings_tab(self):
         tab = QWidget()
@@ -423,15 +429,15 @@ class ForgeWidget(QWidget):
         layout.addStretch()
         tab.setLayout(layout)
 
-        idx = self.cmb_backend.findData(self.saved_backend)
-        if idx >= 0:
-            self.cmb_backend.setCurrentIndex(idx)
+        self.cmb_backend.setCurrentText(self.saved_backend)
         self.txt_url.setText(self.saved_url)
         self.txt_api_key.setText(self.saved_api_key)
         self.txt_model.setText(self.saved_model)
         self.sld_temperature.setValue(int(self.saved_temperature * 10))
-
+        self._on_backend_changed(self.cmb_backend.currentIndex())
         return tab
+
+    # ── Layer management ──────────────────────────────────────
 
     def _load_layers(self):
         self.layer_list.clear()
@@ -452,6 +458,8 @@ class ForgeWidget(QWidget):
             for i in range(self.layer_list.count())
             if self.layer_list.item(i).isSelected()
         ]
+
+    # ── Settings handlers ─────────────────────────────────────
 
     def _on_backend_changed(self, index):
         key = self.cmb_backend.itemData(index)
@@ -497,104 +505,109 @@ class ForgeWidget(QWidget):
             "include_all": self.chk_include_all_providers.isChecked(),
         }
 
-    def _load_settings(self):
-        s = QSettings()
-        self.saved_backend = s.value(SETTINGS_PREFIX + "backend", "ollama")
-        self.saved_url = s.value(SETTINGS_PREFIX + "url", "http://localhost:11434")
-        self.saved_api_key = s.value(SETTINGS_PREFIX + "api_key", "")
-        self.saved_model = s.value(SETTINGS_PREFIX + "model", "qwen2.5-coder:7b")
-        try:
-            self.saved_temperature = float(s.value(SETTINGS_PREFIX + "temperature", 0.2))
-        except (TypeError, ValueError):
-            self.saved_temperature = 0.2
-
-    def _save_settings(self):
-        s = QSettings()
-        key = self.cmb_backend.itemData(self.cmb_backend.currentIndex())
-        s.setValue(SETTINGS_PREFIX + "backend", key)
-        s.setValue(SETTINGS_PREFIX + "url", self.txt_url.text())
-        s.setValue(SETTINGS_PREFIX + "api_key", self.txt_api_key.text())
-        s.setValue(SETTINGS_PREFIX + "model", self.txt_model.text())
-        s.setValue(SETTINGS_PREFIX + "temperature", self.sld_temperature.value() / 10.0)
+    # ── Generate handlers ─────────────────────────────────────
 
     def _on_generate(self):
         description = self.txt_description.toPlainText().strip()
         if not description:
-            QMessageBox.warning(self, "Model Forge", "Please enter a workflow description.")
+            QMessageBox.warning(self, "No Description", "Please describe your workflow.")
             return
 
         self._apply_settings()
-
-        selected_layers = self._get_selected_layers()
-        algo_config = self._get_algo_config()
-        self.current_context_text = self.context_collector.collect(selected_layers, algo_config)
-
         self.btn_generate.setEnabled(False)
-        self.progress_bar.show()
-        self.lbl_status.setText("Starting generation...")
+        self.btn_cancel.setEnabled(True)
+        self.status_label.setText("Generating model...")
 
-        self.worker = GenerateWorker(
-            self.backend, description,
-            self.txt_model_name.text(), self.txt_model_group.text(),
-            self.current_context_text,
-            two_phase=self.chk_two_phase.isChecked(),
-        )
-        self.worker.progress.connect(lambda msg: self.lbl_status.setText(msg))
-        self.worker.finished.connect(self._on_generate_finished)
-        self.worker.error.connect(self._on_generate_error)
-        self.worker.start()
+        layers = self._get_selected_layers()
+        algo_config = self._get_algo_config()
+        context_text = self.context_collector.collect(layers, algo_config)
 
-    def _on_generate_finished(self, workflow):
-        self.progress_bar.hide()
-        self.btn_generate.setEnabled(True)
-
-        plan = workflow.pop("_plan", None)
-
-        if "inputs" not in workflow or "algorithms" not in workflow:
-            self.lbl_status.setText("LLM response missing required keys.")
-            raw_text = json.dumps(workflow, indent=2, ensure_ascii=False)
-            self.txt_model_json.setPlainText(raw_text)
-            self.lbl_validity.setText(
-                "\u26a0 Missing 'inputs' or 'algorithms'. Keys: " + str(list(workflow.keys()))
+        if self.chk_two_phase.isChecked():
+            worker_func = self._two_phase_generate
+            args = (description, context_text)
+        else:
+            worker_func = self.backend.generate_single_pass
+            args = (
+                description,
+                self.txt_model_name.text().strip(),
+                self.txt_model_group.text().strip(),
+                context_text,
             )
-            self.lbl_validity.setStyleSheet("color: orange; font-weight: bold;")
-            self.tabs.setCurrentIndex(1)
-            return
 
-        workflow = compute_layout(workflow)
-        self._current_model_json = workflow
-        self.lbl_status.setText("Model generated! See Model tab.")
+        self._start_worker(worker_func, args, self._on_generate_success, self._on_generate_error)
 
-        self.txt_model_json.setPlainText(json.dumps(workflow, indent=2, ensure_ascii=False))
+    def _two_phase_generate(self, description, context_text):
+        plan = self.backend.generate_plan(description, context_text)
+        return self.backend.generate_model_from_plan(plan, context_text)
+
+    def _on_generate_success(self, result):
+        self._finish_worker()
+        result = compute_layout(result)
+        self._current_model_json = result
+        pretty = json.dumps(result, indent=2, ensure_ascii=False)
+        self.txt_model_json.setPlainText(pretty)
         self.lbl_validity.setText("\u2713 Valid JSON structure received.")
         self.lbl_validity.setStyleSheet("color: #4CAF50; font-weight: bold;")
+        self.tabs.setCurrentIndex(1)
+        self.status_label.setText("Model generated successfully.")
+
+        # Enable Model tab buttons
         self.btn_rebuild.setEnabled(True)
         self.btn_improve.setEnabled(True)
         self.btn_auto_repair.setEnabled(True)
-        self.tabs.setCurrentIndex(1)
 
-        self._try_build_model(workflow)
+        # Try building the actual QGIS model
+        self._try_build_model(result)
 
-    def _on_generate_error(self, error_msg):
-        self.progress_bar.hide()
+    def _on_generate_error(self, message, raw_response=""):
+        self._finish_worker()
+        if raw_response:
+            self.txt_model_json.setPlainText(raw_response)
+            self.lbl_validity.setText(
+                "\u26a0 Invalid JSON. The raw LLM response is shown below for debugging.\n"
+                + message
+            )
+            self.lbl_validity.setStyleSheet("color: orange; font-weight: bold;")
+            self.tabs.setCurrentIndex(1)
+            self.status_label.setText("Generation returned invalid JSON \u2014 shown for debugging.")
+        else:
+            QMessageBox.warning(
+                self, "Generation Error",
+                message + "\n\nTry:\n"
+                "\u2022 A shorter or simpler description\n"
+                "\u2022 Lowering the thinking level\n"
+                "\u2022 Switching to another model"
+            )
+            self.status_label.setText("Generation failed.")
+
+    def _on_cancel(self):
+        self._cancelled = True
+        self.status_label.setText("Request cancelled.")
+
+    def _finish_worker(self):
         self.btn_generate.setEnabled(True)
-        self.lbl_status.setText("Generation failed.")
+        self.btn_cancel.setEnabled(False)
+        self.worker = None
+        self.thread = None
 
-        # Try to show raw LLM text if it's embedded in the error
-        if "Raw response snippet:" in error_msg:
-            parts = error_msg.split("Raw response snippet:\n\n", 1)
-            msg = parts[0].strip()
-            raw = parts[1] if len(parts) > 1 else ""
-            if raw:
-                self.txt_model_json.setPlainText(raw)
-                self.lbl_validity.setText(
-                    "\u26a0 Invalid JSON. Raw LLM response shown for debugging.\n" + msg
-                )
-                self.lbl_validity.setStyleSheet("color: orange; font-weight: bold;")
-                self.tabs.setCurrentIndex(1)
-                return
+    def _start_worker(self, func, args, on_success, on_error):
+        if self.thread is not None:
+            try:
+                self.thread.quit()
+            except RuntimeError:
+                pass
+            self.thread = None
+            self.worker = None
 
-        QMessageBox.critical(self, "Generation Error", "Error generating model:\n" + error_msg)
+        self.thread = QThread()
+        self.worker = LLMWorker(func, *args)
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(on_success)
+        self.worker.error.connect(on_error)
+        self.thread.start()
+
+    # ── Build + Validate (from v3) ────────────────────────────
 
     def _try_build_model(self, workflow):
         try:
@@ -611,6 +624,8 @@ class ForgeWidget(QWidget):
             self.btn_save.setEnabled(False)
             self.btn_open_designer.setEnabled(False)
             self.status_label.setText("Build warning: " + str(e))
+
+    # ── Model tab handlers ────────────────────────────────────
 
     def _on_rebuild_from_json(self):
         text = self.txt_model_json.toPlainText().strip()
@@ -644,6 +659,7 @@ class ForgeWidget(QWidget):
             if not text:
                 QMessageBox.warning(self, "Empty", "No model JSON to save.")
                 return
+            # Save raw JSON as fallback
             path, _ = QFileDialog.getSaveFileName(self, "Save Model", "", "QGIS Model (*.model3)")
             if path:
                 if not path.endswith(".model3"):
@@ -664,7 +680,7 @@ class ForgeWidget(QWidget):
                 QMessageBox.warning(self, "Model Forge", "Failed to save model.")
 
     def _on_open_designer(self):
-        """Open the current model in QGIS Model Designer."""
+        """Open the current model in QGIS Model Designer (from v3)."""
         import tempfile
         from qgis.core import QgsProcessingModelAlgorithm
         from processing.modeler.ModelerDialog import ModelerDialog
@@ -704,6 +720,8 @@ class ForgeWidget(QWidget):
                 "Could not open Designer:\n" + str(e),
             )
 
+    # ── Repair / Improve handlers ─────────────────────────────
+
     def _on_auto_repair(self):
         text = self.txt_model_json.toPlainText().strip()
         if not text:
@@ -721,18 +739,18 @@ class ForgeWidget(QWidget):
             return
 
         self._apply_settings()
-        self.lbl_validity.setText("Sending repair request to LLM...")
-        self.lbl_validity.setStyleSheet("color: #2196F3;")
-        self.progress_bar.show()
-        self.btn_auto_repair.setEnabled(False)
-        self.btn_improve.setEnabled(False)
+        self.status_label.setText("Auto-repairing...")
+        self.btn_generate.setEnabled(False)
+        self.btn_cancel.setEnabled(True)
 
-        self.repair_worker = RepairWorker(
-            self.backend, workflow, errors, self.current_context_text,
+        layers = self._get_selected_layers()
+        algo_config = self._get_algo_config()
+        context_text = self.context_collector.collect(layers, algo_config)
+
+        self._start_worker(
+            self.backend.repair_model, (workflow, errors, context_text),
+            self._on_repair_success, self._on_generate_error
         )
-        self.repair_worker.finished.connect(self._on_repair_finished)
-        self.repair_worker.error.connect(self._on_repair_error)
-        self.repair_worker.start()
 
     def _on_improve(self):
         text = self.txt_model_json.toPlainText().strip()
@@ -751,48 +769,32 @@ class ForgeWidget(QWidget):
             return
 
         self._apply_settings()
-        self.lbl_validity.setText("Improving model...")
-        self.lbl_validity.setStyleSheet("color: #2196F3;")
-        self.progress_bar.show()
-        self.btn_auto_repair.setEnabled(False)
-        self.btn_improve.setEnabled(False)
+        self.status_label.setText("Improving model...")
+        self.btn_generate.setEnabled(False)
+        self.btn_cancel.setEnabled(True)
+
+        layers = self._get_selected_layers()
+        algo_config = self._get_algo_config()
+        context_text = self.context_collector.collect(layers, algo_config)
 
         errors = self._validate_model(workflow)
-        all_errors = errors + [f"USER FEEDBACK: {feedback}"]
+        all_feedback = errors + [f"USER FEEDBACK: {feedback}"]
 
-        self.repair_worker = RepairWorker(
-            self.backend, workflow, all_errors, self.current_context_text,
+        self._start_worker(
+            self.backend.repair_model, (workflow, all_feedback, context_text),
+            self._on_repair_success, self._on_generate_error
         )
-        self.repair_worker.finished.connect(self._on_repair_finished)
-        self.repair_worker.error.connect(self._on_repair_error)
-        self.repair_worker.start()
 
-    def _on_repair_finished(self, repaired):
-        self.progress_bar.hide()
-        self.btn_auto_repair.setEnabled(True)
-        self.btn_improve.setEnabled(True)
-
-        if "inputs" not in repaired or "algorithms" not in repaired:
-            self.lbl_validity.setText("Repair response missing required keys.")
-            self.lbl_validity.setStyleSheet("color: red;")
-            raw_text = json.dumps(repaired, indent=2, ensure_ascii=False)
-            self.txt_model_json.setPlainText(raw_text)
-            return
-
-        repaired = compute_layout(repaired)
-        self._current_model_json = repaired
-        self.txt_model_json.setPlainText(json.dumps(repaired, indent=2, ensure_ascii=False))
+    def _on_repair_success(self, result):
+        self._finish_worker()
+        result = compute_layout(result)
+        self._current_model_json = result
+        pretty = json.dumps(result, indent=2, ensure_ascii=False)
+        self.txt_model_json.setPlainText(pretty)
         self.lbl_validity.setText("\u2713 Model repaired/improved.")
         self.lbl_validity.setStyleSheet("color: #4CAF50; font-weight: bold;")
         self.status_label.setText("Model improved successfully.")
-        self._try_build_model(repaired)
-
-    def _on_repair_error(self, error_msg):
-        self.progress_bar.hide()
-        self.btn_auto_repair.setEnabled(True)
-        self.btn_improve.setEnabled(True)
-        self.lbl_validity.setText("Repair failed: " + error_msg)
-        self.lbl_validity.setStyleSheet("color: red;")
+        self._try_build_model(result)
 
     def _validate_model(self, workflow):
         """Basic structural validation. Returns list of error strings."""
@@ -821,3 +823,21 @@ class ForgeWidget(QWidget):
                             f"unknown child_id '{ref}'."
                         )
         return errors
+
+    def _load_settings(self):
+        s = QSettings()
+        self.saved_backend = s.value(SETTINGS_PREFIX + "backend", "ollama")
+        self.saved_url = s.value(SETTINGS_PREFIX + "url", "http://localhost:11434")
+        self.saved_api_key = s.value(SETTINGS_PREFIX + "api_key", "")
+        self.saved_model = s.value(SETTINGS_PREFIX + "model", "gpt-oss:20b-cloud")
+        self.saved_temperature = float(s.value(SETTINGS_PREFIX + "temperature", 0.2))
+
+    def _save_settings(self):
+        s = QSettings()
+        key = self.cmb_backend.itemData(self.cmb_backend.currentIndex())
+        s.setValue(SETTINGS_PREFIX + "backend", key)
+        s.setValue(SETTINGS_PREFIX + "url", self.txt_url.text())
+        s.setValue(SETTINGS_PREFIX + "api_key", self.txt_api_key.text())
+        s.setValue(SETTINGS_PREFIX + "model", self.txt_model.text())
+        s.setValue(SETTINGS_PREFIX + "temperature", self.sld_temperature.value() / 10.0)
+
