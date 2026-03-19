@@ -120,13 +120,4 @@ The plugin expects and produces a simple JSON structure:
 
 ### Extending the plugin
 
-Typical extension points:
-
-- Add new backends to `LLMBackend.BACKENDS` and implement the corresponding API client methods.
-- Adjust layout rules in `model_layout.py` to change how models are placed in the Designer.
-- Enhance `ContextCollector` to include additional metadata (layer fields, CRS, statistics) in the LLM prompt.
-- Add more validation rules or domain‑specific checks in `_validate_model` and `ModelBuilder`.
-
-### Extending the plugin
-
 Feel free to suggest prompt, UI or other improvements
