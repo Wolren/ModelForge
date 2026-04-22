@@ -30,6 +30,8 @@ if _HAS_QGIS:
 
         INPUT_JSON   = "INPUT_JSON"
         LAYOUT_MODE  = "LAYOUT_MODE"
+        ORIENTATION  = "ORIENTATION"
+        STRATEGY     = "STRATEGY"
         OUTPUT_JSON  = "OUTPUT_JSON"
 
         def name(self)        -> str: return "mcp_auto_layout"
@@ -47,14 +49,30 @@ if _HAS_QGIS:
                 options=["compact", "balanced", "dense", "spacious", "debug"],
                 defaultValue=1,
             ))
+            self.addParameter(QgsProcessingParameterEnum(
+                self.ORIENTATION, self.tr("Organisation"),
+                options=["horizontal", "vertical", "axis"],
+                defaultValue=0,
+            ))
+            self.addParameter(QgsProcessingParameterEnum(
+                self.STRATEGY, self.tr("Layout algorithm"),
+                options=["sugiyama", "topological", "axis_pack", "radial_shell", "ancestor_weighted"],
+                defaultValue=0,
+            ))
             self.addOutput(QgsProcessingOutputString(
                 self.OUTPUT_JSON, self.tr("Re-laid-out model JSON")))
 
         def processAlgorithm(self, parameters, context, feedback):
             raw_json   = self.parameterAsString(parameters, self.INPUT_JSON,   context)
             layout_idx = self.parameterAsEnum  (parameters, self.LAYOUT_MODE,  context)
+            orient_idx = self.parameterAsEnum  (parameters, self.ORIENTATION,  context)
+            strat_idx  = self.parameterAsEnum  (parameters, self.STRATEGY,     context)
             modes      = ["compact", "balanced", "dense", "spacious", "debug"]
+            orientations = ["horizontal", "vertical", "axis"]
+            strategies = ["sugiyama", "topological", "axis_pack", "radial_shell", "ancestor_weighted"]
             mode       = modes[layout_idx]
+            orientation = orientations[orient_idx]
+            strategy = strategies[strat_idx]
 
             try:
                 model_json = json.loads(raw_json)
@@ -63,9 +81,14 @@ if _HAS_QGIS:
 
             from ...core.services.graph_layout import GraphLayoutService
             svc        = GraphLayoutService()
-            result     = svc.layout_model_json(model_json, mode=mode)
+            result     = svc.layout_model_json(
+                model_json,
+                mode=mode,
+                orientation=orientation,
+                strategy=strategy,
+            )
             result_str = json.dumps(result, indent=2, ensure_ascii=False)
-            feedback.pushInfo(f"Applied {mode} layout to model with "
+            feedback.pushInfo(f"Applied {mode}/{orientation}/{strategy} layout to model with "
                               f"{len(result.get('algorithms', []))} steps.")
             return {self.OUTPUT_JSON: result_str}
 

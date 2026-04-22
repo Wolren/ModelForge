@@ -28,4 +28,36 @@ class ModelForgeMCPServer:
         tool = self._tools.get(name)
         if tool is None:
             raise ValueError(f"Unknown MCP tool: {name!r}")
+        self._validate_args(tool, args)
         return tool.handler(args)
+
+    @staticmethod
+    def _validate_args(tool: MCPTool, args: Dict[str, Any]) -> None:
+        if not isinstance(args, dict):
+            raise ValueError(f"Invalid args for {tool.name}: expected an object.")
+
+        schema = tool.schema or {}
+        required = schema.get("required", [])
+        for key in required:
+            if key not in args:
+                raise ValueError(f"Missing required arg '{key}' for tool '{tool.name}'.")
+
+        type_map = {
+            "object": dict,
+            "array": list,
+            "string": str,
+            "number": (int, float),
+            "boolean": bool,
+            "integer": int,
+        }
+        props = schema.get("properties", {})
+        for key, value in args.items():
+            prop = props.get(key)
+            if not prop:
+                continue
+            expected = prop.get("type")
+            py_type = type_map.get(expected)
+            if py_type and not isinstance(value, py_type):
+                raise ValueError(
+                    f"Invalid type for '{key}' in tool '{tool.name}': expected {expected}."
+                )

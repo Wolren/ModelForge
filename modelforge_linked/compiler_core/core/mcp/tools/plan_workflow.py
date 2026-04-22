@@ -2,12 +2,9 @@
 MCP Tool: plan_workflow
 Decomposes a natural-language geoprocessing description into a SemanticPlan.
 """
-import json
-
 SYSTEM_PROMPT = """\
-You are a QGIS geoprocessing workflow planner.
-Given a natural-language description and a QGIS context, produce a SemanticPlan
-as a single JSON object with NO markdown fencing.
+You are a QGIS workflow planner.
+Output exactly one SemanticPlan JSON object.
 
 JSON schema:
 {
@@ -32,7 +29,10 @@ JSON schema:
     }
   ]
 }
-Rules: step_ids must be unique snake_case. Do NOT use algorithm IDs.
+Rules:
+- step_ids: unique snake_case
+- intents: concise action phrases
+- do not use algorithm IDs in steps
 Return ONLY valid JSON.
 """
 
@@ -50,13 +50,31 @@ SCHEMA = {
 
 def build_user_message(args: dict) -> str:
     ctx = args.get("qgis_context", {})
-    layers_txt = json.dumps(ctx.get("layers", []), indent=2)
-    algos_txt  = json.dumps(list(ctx.get("algorithms", {}).keys()), indent=2)
+    layers = ctx.get("layers", [])
+    alg_ids = list(ctx.get("algorithms", {}).keys())
+
+    layer_lines = []
+    for layer in layers[:8]:
+        fields = [f.get("name", "") for f in layer.get("fields", [])[:8]]
+        fields_txt = ", ".join([f for f in fields if f]) or "-"
+        layer_lines.append(
+            f"- {layer.get('name', 'layer')} [{layer.get('type', 'unknown')}] "
+            f"crs={layer.get('crs', '?')} fields={fields_txt}"
+        )
+    if len(layers) > 8:
+        layer_lines.append(f"- ... {len(layers) - 8} more layer(s)")
+
+    algo_preview = alg_ids[:80]
+    algo_lines = [f"- {alg_id}" for alg_id in algo_preview]
+    if len(alg_ids) > len(algo_preview):
+        algo_lines.append(f"- ... {len(alg_ids) - len(algo_preview)} more algorithm id(s)")
+
     return (
         f"Model name: {args.get('model_name', 'workflow')}\n"
         f"Model group: {args.get('model_group', 'ModelForge')}\n\n"
-        f"DESCRIPTION:\n{args['description']}\n\n"
-        f"AVAILABLE LAYERS:\n{layers_txt}\n\n"
-        f"AVAILABLE ALGORITHM IDs (reference only):\n{algos_txt}\n\n"
-        f"Produce a SemanticPlan JSON."
+        f"Goal:\n{args['description']}\n\n"
+        f"Project CRS: {ctx.get('project_crs') or 'unknown'}\n\n"
+        f"Layers:\n{chr(10).join(layer_lines) if layer_lines else '- none'}\n\n"
+        f"Available algorithm IDs (reference only):\n{chr(10).join(algo_lines) if algo_lines else '- none'}\n\n"
+        "Produce the SemanticPlan JSON."
     )

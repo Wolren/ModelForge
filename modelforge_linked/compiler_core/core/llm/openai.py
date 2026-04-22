@@ -3,8 +3,10 @@ OpenAILLMBackend - calls OpenAI chat completions API.
 """
 from __future__ import annotations
 import json
+import socket
+import urllib.error
 import urllib.request
-from .base import LLMBackend
+from .base import LLMBackend, LLMTimeoutError, LLMRequestError, LLMResponseError
 
 
 class OpenAILLMBackend(LLMBackend):
@@ -41,6 +43,21 @@ class OpenAILLMBackend(LLMBackend):
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            data = json.loads(resp.read())
-        return data["choices"][0]["message"]["content"]
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read())
+        except (TimeoutError, socket.timeout) as e:
+            raise LLMTimeoutError(
+                f"OpenAI request timed out after {self.timeout}s."
+            ) from e
+        except urllib.error.URLError as e:
+            raise LLMRequestError(
+                f"Could not reach OpenAI endpoint at {self.base_url}."
+            ) from e
+        except json.JSONDecodeError as e:
+            raise LLMResponseError(f"OpenAI returned invalid JSON: {e}") from e
+
+        try:
+            return data["choices"][0]["message"]["content"]
+        except Exception as e:
+            raise LLMResponseError("OpenAI response missing expected message content.") from e

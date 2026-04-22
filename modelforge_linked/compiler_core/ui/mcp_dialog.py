@@ -82,8 +82,15 @@ if _HAS_QGIS:
                 self.finished.emit(model_json, plan.issues)
 
             except Exception as e:
-                import traceback
-                self.error.emit(f"{e}\n\n{traceback.format_exc()}")
+                from ..core.llm.base import LLMTimeoutError, LLMBackendError
+                if isinstance(e, LLMTimeoutError):
+                    self.error.emit(
+                        "The LLM request timed out. Try a smaller context or increase backend timeout."
+                    )
+                elif isinstance(e, LLMBackendError):
+                    self.error.emit(str(e))
+                else:
+                    self.error.emit(str(e) or "Compiler execution failed.")
 
 
     class MCPDialog(QDialog):

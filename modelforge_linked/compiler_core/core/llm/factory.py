@@ -24,6 +24,7 @@ def create_backend(config: Dict[str, Any]) -> LLMBackend:
         return OllamaLLMBackend(
             model=config.get("model", "llama3"),
             base_url=config.get("base_url", "http://localhost:11434"),
+            timeout=int(config.get("timeout", 240)),
             temperature=config.get("temperature", 0.1),
         )
 
@@ -33,6 +34,7 @@ def create_backend(config: Dict[str, Any]) -> LLMBackend:
             api_key=config.get("api_key", ""),
             model=config.get("model", "gpt-4o-mini"),
             base_url=config.get("base_url", "https://api.openai.com"),
+            timeout=int(config.get("timeout", 180)),
             temperature=config.get("temperature", 0.1),
         )
 

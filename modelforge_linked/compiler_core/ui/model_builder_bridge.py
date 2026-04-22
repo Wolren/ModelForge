@@ -46,6 +46,8 @@ from __future__ import annotations
 import os
 import tempfile
 import xml.etree.ElementTree as ET
+import copy
+import re
 from typing import Any, Dict
 
 try:
@@ -116,11 +118,19 @@ def _find_child_node(root: ET.Element, actual_child_id: str) -> ET.Element | Non
     name attribute equals the assigned childId, so a direct name-match
     is both correct and fast.
     """
+    # QGIS model XML schema has differed across versions:
+    # - children map key: "children" or "algs"
+    # - container type attr may be absent on empty/new models
     for el in root.iter("Option"):
-        if el.get("name") == "children" and el.get("type") == "Map":
-            for child in el:
-                if child.get("name") == actual_child_id:
+        if el.get("name") in ("children", "algs"):
+            for child in list(el):
+                if child.get("name") == actual_child_id and child.tag == "Option":
                     return child
+
+    # Fallback: search globally by direct child id map node
+    for el in root.iter("Option"):
+        if el.get("name") == actual_child_id and el.get("type") == "Map":
+            return el
     return None
 
 
@@ -138,14 +148,16 @@ def _inject_params_xml(
     if child_node is None:
         return False
 
+    params_key = "params"
     for el in list(child_node):
-        if el.get("name") == "params":
+        if el.get("name") in ("params", "parameters"):
+            params_key = el.get("name") or "params"
             child_node.remove(el)
             break
 
     params_el = ET.SubElement(child_node, "Option")
     params_el.set("type", "Map")
-    params_el.set("name", "params")
+    params_el.set("name", params_key)
 
     for pname, pbind in bindings.items():
         list_el = ET.SubElement(params_el, "Option")
@@ -199,7 +211,17 @@ if _HAS_QGIS:
             self,
             model_json: Dict[str, Any],
             open_designer: bool = True,
+            auto_wire_missing: bool = True,
+            prefer_project_outputs: bool = True,
+            renaming_strategy: str = "preserve",
         ) -> QgsProcessingModelAlgorithm:
+            if auto_wire_missing:
+                model_json = self.auto_wire_model_json(
+                    model_json,
+                    prefer_project_outputs=prefer_project_outputs,
+                    renaming_strategy=renaming_strategy,
+                )
+
             model_name  = model_json.get("model_name",  "ModelForge Workflow")
             model_group = model_json.get("model_group", "ModelForge")
 
@@ -229,6 +251,69 @@ if _HAS_QGIS:
                 self._open_in_designer(model)
 
             return model
+
+        def auto_wire_model_json(
+            self,
+            model_json: Dict[str, Any],
+            prefer_project_outputs: bool = True,
+            renaming_strategy: str = "preserve",
+        ) -> Dict[str, Any]:
+            """
+            Fill missing parameter bindings deterministically using:
+            1) model input name matching,
+            2) previous-step output fallback for layer-like params,
+            3) destination defaults for outputs.
+            """
+            result = copy.deepcopy(model_json or {})
+            algorithms = result.get("algorithms", [])
+            inputs = result.get("inputs", [])
+            self._apply_step_renaming(result, strategy=renaming_strategy)
+
+            input_names = [inp.get("name", "") for inp in inputs if inp.get("name")]
+            normalized_input_map = {self._normalize_token(name): name for name in input_names}
+            previous_step_ids: list[str] = []
+
+            registry = QgsApplication.processingRegistry()
+
+            for alg in algorithms:
+                algorithm_id = alg.get("algorithm_id", "")
+                qgs_alg = registry.algorithmById(algorithm_id) if algorithm_id else None
+                if qgs_alg is None:
+                    if alg.get("id"):
+                        previous_step_ids.append(alg.get("id"))
+                    continue
+
+                params = alg.setdefault("parameters", {})
+                for pdef in qgs_alg.parameterDefinitions():
+                    pname = pdef.name()
+                    if pname in params:
+                        continue
+
+                    if prefer_project_outputs and self._is_destination_param(pdef):
+                        params[pname] = {"type": "static", "value": "TEMPORARY_OUTPUT"}
+                        continue
+
+                    matched_input = self._match_input_name(pname, normalized_input_map)
+                    if matched_input:
+                        params[pname] = {"type": "model_input", "input_name": matched_input}
+                        continue
+
+                    if previous_step_ids and self._expects_layer_like_input(pdef):
+                        params[pname] = {
+                            "type": "child_output",
+                            "child_id": previous_step_ids[-1],
+                            "output_name": "OUTPUT",
+                        }
+                        continue
+
+                    default_value = self._to_json_scalar(pdef.defaultValue()) if hasattr(pdef, "defaultValue") else None
+                    if default_value is not None and default_value != "":
+                        params[pname] = {"type": "static", "value": default_value}
+
+                if alg.get("id"):
+                    previous_step_ids.append(alg.get("id"))
+
+            return result
 
         # ------------------------------------------------------------------
         # Designer
@@ -388,6 +473,112 @@ if _HAS_QGIS:
             os.close(fd)
             return path
 
+        @staticmethod
+        def _normalize_token(value: str) -> str:
+            return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+        @classmethod
+        def _match_input_name(cls, param_name: str, normalized_input_map: Dict[str, str]) -> str | None:
+            pnorm = cls._normalize_token(param_name)
+            if pnorm in normalized_input_map:
+                return normalized_input_map[pnorm]
+
+            for key, original in normalized_input_map.items():
+                if pnorm and (pnorm in key or key in pnorm):
+                    return original
+            return None
+
+        @staticmethod
+        def _is_destination_param(pdef) -> bool:
+            cname = pdef.__class__.__name__.lower()
+            return "destination" in cname or "sink" in cname
+
+        @staticmethod
+        def _expects_layer_like_input(pdef) -> bool:
+            cname = pdef.__class__.__name__.lower()
+            hints = ("source", "vector", "raster", "layer", "feature", "mesh", "pointcloud")
+            return any(h in cname for h in hints)
+
+        @staticmethod
+        def _to_json_scalar(value):
+            if value is None:
+                return None
+            if isinstance(value, (bool, int, float, str)):
+                return value
+            return str(value)
+
+        @classmethod
+        def _apply_step_renaming(cls, model_json: Dict[str, Any], strategy: str = "preserve") -> None:
+            algorithms = model_json.get("algorithms", [])
+            if not isinstance(algorithms, list):
+                return
+
+            strategy = (strategy or "preserve").lower()
+            used: set[str] = set()
+            id_map: Dict[str, str] = {}
+
+            for idx, alg in enumerate(algorithms, start=1):
+                old_id = str(alg.get("id", "") or "")
+                new_id = cls._compute_step_id(alg, idx, strategy, used)
+                alg["id"] = new_id
+                if old_id:
+                    id_map[old_id] = new_id
+
+            for alg in algorithms:
+                params = alg.get("parameters", {})
+                if not isinstance(params, dict):
+                    continue
+                for pbind in params.values():
+                    if isinstance(pbind, dict) and pbind.get("type") == "child_output":
+                        child_id = str(pbind.get("child_id", "") or "")
+                        if child_id in id_map:
+                            pbind["child_id"] = id_map[child_id]
+
+        @classmethod
+        def _compute_step_id(
+            cls,
+            alg: Dict[str, Any],
+            idx: int,
+            strategy: str,
+            used: set[str],
+        ) -> str:
+            raw_id = str(alg.get("id", "") or "")
+            label = str(alg.get("description", "") or "")
+            alg_id = str(alg.get("algorithm_id", "") or "")
+
+            if strategy == "suffix_counter":
+                base = cls._slug(raw_id) or "step"
+                candidate = f"{base}_{idx}"
+                return cls._unique_id(candidate, used)
+
+            if strategy == "label_slug":
+                base = cls._slug(label) or cls._slug(alg_id.split(":")[-1]) or "step"
+                candidate = f"{base}_{idx}"
+                return cls._unique_id(candidate, used)
+
+            # preserve: keep original ids when possible, while ensuring valid + unique ids
+            base = cls._slug(raw_id) or "step"
+            candidate = raw_id if raw_id and raw_id not in used else base
+            return cls._unique_id(cls._slug(candidate) or "step", used)
+
+        @staticmethod
+        def _slug(value: str) -> str:
+            value = str(value or "").strip().lower()
+            value = re.sub(r"[^a-z0-9]+", "_", value)
+            return value.strip("_")
+
+        @staticmethod
+        def _unique_id(base: str, used: set[str]) -> str:
+            if base not in used:
+                used.add(base)
+                return base
+            i = 2
+            while f"{base}_{i}" in used:
+                i += 1
+            result = f"{base}_{i}"
+            used.add(result)
+            return result
+
 
 else:
 
@@ -398,6 +589,11 @@ else:
             self.iface = iface
 
         def load_model_json(self, model_json, open_designer=True):
+            raise RuntimeError(
+                "ModelBuilderBridge requires a QGIS runtime environment."
+            )
+
+        def auto_wire_model_json(self, model_json, prefer_project_outputs=True, renaming_strategy="preserve"):
             raise RuntimeError(
                 "ModelBuilderBridge requires a QGIS runtime environment."
             )

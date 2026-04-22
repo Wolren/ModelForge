@@ -23,7 +23,11 @@ Model Forge is a QGIS plugin that helps you turn plain‑language descriptions o
 3. Optionally:
    - Set a **Name** and **Group** for the model.
    - Select one or more **Context layers** that describe your data.
-   - Enable **Two‑phase generation** for complex, multi‑step workflows.
+   - Use **Layout and naming options**:
+     - **Layout profile** (`compact`, `balanced`, `dense`, `spacious`, `debug`)
+     - **Organisation** (`horizontal`, `vertical`, `axis`)
+     - **Layout algorithm** (`sugiyama`, `topological`, `axis_pack`, `radial_shell`, `ancestor_weighted`)
+   - Enable **Optimize generation (auto-fix errors)** to auto-retry with tighter prompts/context and suppress transient timeout/error noise.
 4. Click **Generate Model**.
 5. When generation finishes, the plugin switches to the **Model** tab and shows the resulting model JSON.
 
@@ -35,6 +39,15 @@ In the **Model** tab:
 - Use **Rebuild model from JSON above** after manual edits to rebuild the internal QGIS model object.
 - Use **Save .model3** to write the current model to a `.model3` file that you can load from the standard Processing Model Designer.
 - Use **Open in Designer** to open the model directly in the QGIS Model Designer with a pre‑computed layout.
+- Use **Auto-wire model steps** to let the model builder automatically wire missing parameter connections.
+- Use **Re-layout current JSON** to re-apply a selected profile/organisation/algorithm without regenerating the workflow.
+- In **Model Designer**, use **Auto-layout (Model Forge)** for direct in-designer re-layout with current controls.
+
+### History
+
+- The **History** tab (between Model and Settings) stores recent generation attempts.
+- You can **load**, **rename**, **delete**, or **clear** past attempts.
+- Loaded entries restore the saved model JSON and layout controls.
 
 ### Debug and improve
 
@@ -126,6 +139,8 @@ The plugin expects and produces a simple JSON structure:
   ```
 
   and are used to build connections between model components.
+
+- For output destination parameters (sink/destination) the linked builder now defaults missing values to temporary outputs, so finished layers are added to project layers by default unless explicitly overridden in JSON.
 
 `_validate_model` in `forge_widget.py` performs basic structural checks (missing keys, duplicate ids, invalid child references) before attempting repair.
 

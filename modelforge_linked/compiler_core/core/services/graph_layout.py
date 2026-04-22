@@ -99,7 +99,13 @@ class GraphLayoutService:
                     step.pos_y = 20.0 + j * cfg.v_spacing
                     step.rank  = rank
 
-    def layout_model_json(self, model_json: Dict[str, Any], mode: str = "balanced") -> Dict[str, Any]:
+    def layout_model_json(
+        self,
+        model_json: Dict[str, Any],
+        mode: str = "balanced",
+        orientation: str = "horizontal",
+        strategy: str = "sugiyama",
+    ) -> Dict[str, Any]:
         """
         Apply layout to a model JSON dict (the format used by ModelBuilder).
         Returns a new dict with pos_x / pos_y set on inputs and algorithms.
@@ -130,14 +136,66 @@ class GraphLayoutService:
                         dep_map[child].append(alg_id)
 
         alg_ids = [a.get("id", "") for a in algorithms]
-        ranks   = self._assign_ranks(alg_ids, dep_map)
+        ranks = self._assign_layout_levels(alg_ids, dep_map, strategy=strategy)
 
-        # Position inputs
+        self._apply_orientation_layout(
+            inputs=inputs,
+            algorithms=algorithms,
+            ranks=ranks,
+            cfg=cfg,
+            orientation=orientation,
+        )
+
+        return result
+
+    def _apply_orientation_layout(
+        self,
+        inputs: List[Dict[str, Any]],
+        algorithms: List[Dict[str, Any]],
+        ranks: Dict[str, int],
+        cfg: LayoutConfig,
+        orientation: str = "horizontal",
+    ) -> None:
+        orientation = (orientation or "horizontal").lower()
+
+        if orientation == "vertical":
+            for i, inp in enumerate(inputs):
+                inp["pos_x"] = 20.0 + i * cfg.h_spacing
+                inp["pos_y"] = cfg.input_x
+
+            ranks_by_level: Dict[int, List] = defaultdict(list)
+            for alg in algorithms:
+                rank = ranks.get(alg.get("id", ""), 0)
+                ranks_by_level[rank].append(alg)
+
+            for rank, algs in sorted(ranks_by_level.items()):
+                y = cfg.start_x + rank * cfg.h_spacing
+                for j, alg in enumerate(algs):
+                    alg["pos_x"] = 20.0 + j * cfg.h_spacing
+                    alg["pos_y"] = y
+            return
+
+        if orientation == "axis":
+            for i, inp in enumerate(inputs):
+                inp["pos_x"] = cfg.input_x + (i * cfg.h_spacing * 0.35)
+                inp["pos_y"] = 20.0 + i * cfg.v_spacing
+
+            ranks_by_level: Dict[int, List] = defaultdict(list)
+            for alg in algorithms:
+                rank = ranks.get(alg.get("id", ""), 0)
+                ranks_by_level[rank].append(alg)
+
+            for rank, algs in sorted(ranks_by_level.items()):
+                for j, alg in enumerate(algs):
+                    alg["pos_x"] = cfg.start_x + rank * cfg.h_spacing
+                    alg["pos_y"] = 20.0 + j * cfg.v_spacing + rank * (cfg.v_spacing * 0.5)
+            return
+
+        # horizontal (default)
         for i, inp in enumerate(inputs):
             inp["pos_x"] = cfg.input_x
             inp["pos_y"] = 20.0 + i * cfg.v_spacing
 
-        # Position algorithms by rank
         ranks_by_level: Dict[int, List] = defaultdict(list)
         for alg in algorithms:
             rank = ranks.get(alg.get("id", ""), 0)
@@ -149,7 +207,140 @@ class GraphLayoutService:
                 alg["pos_x"] = x
                 alg["pos_y"] = 20.0 + j * cfg.v_spacing
 
-        return result
+    def _assign_layout_levels(
+        self,
+        node_ids: List[str],
+        dep_map: Dict[str, List[str]],
+        strategy: str = "sugiyama",
+    ) -> Dict[str, int]:
+        strategy = (strategy or "sugiyama").lower()
+        if strategy == "topological":
+            return self._assign_topological_levels(node_ids, dep_map)
+        if strategy == "axis_pack":
+            # Keep DAG-level ranks but use this selector as a stable strategy switch.
+            return self._assign_ranks(node_ids, dep_map)
+        if strategy == "radial_shell":
+            return self._assign_radial_shell_levels(node_ids, dep_map)
+        if strategy == "ancestor_weighted":
+            return self._assign_ancestor_weighted_levels(node_ids, dep_map)
+        return self._assign_ranks(node_ids, dep_map)
+
+    def _assign_topological_levels(
+        self,
+        node_ids: List[str],
+        dep_map: Dict[str, List[str]],
+    ) -> Dict[str, int]:
+        in_degree: Dict[str, int] = {nid: 0 for nid in node_ids}
+        rev_adj: Dict[str, List[str]] = defaultdict(list)
+        for src, targets in dep_map.items():
+            for tgt in targets:
+                if tgt in in_degree:
+                    in_degree[tgt] += 1
+                if src in in_degree:
+                    rev_adj[src].append(tgt)
+
+        queue: deque = deque()
+        for nid in node_ids:
+            if in_degree.get(nid, 0) == 0:
+                queue.append(nid)
+
+        order: List[str] = []
+        while queue:
+            nid = queue.popleft()
+            order.append(nid)
+            for child in rev_adj.get(nid, []):
+                in_degree[child] -= 1
+                if in_degree[child] == 0:
+                    queue.append(child)
+
+        for nid in node_ids:
+            if nid not in order:
+                order.append(nid)
+
+        return {nid: idx for idx, nid in enumerate(order)}
+
+    def _assign_radial_shell_levels(
+        self,
+        node_ids: List[str],
+        dep_map: Dict[str, List[str]],
+    ) -> Dict[str, int]:
+        """
+        Custom strategy:
+        1. Treat graph edges as undirected.
+        2. Start from source nodes (zero in-degree), or first node fallback.
+        3. Assign shell/ring level by BFS distance.
+        """
+        if not node_ids:
+            return {}
+
+        neighbors: Dict[str, Set[str]] = {nid: set() for nid in node_ids}
+        in_degree: Dict[str, int] = {nid: 0 for nid in node_ids}
+        for src, targets in dep_map.items():
+            for tgt in targets:
+                if src in neighbors and tgt in neighbors:
+                    neighbors[src].add(tgt)
+                    neighbors[tgt].add(src)
+                if tgt in in_degree:
+                    in_degree[tgt] += 1
+
+        seeds = [nid for nid in node_ids if in_degree.get(nid, 0) == 0]
+        if not seeds:
+            seeds = [node_ids[0]]
+
+        ranks: Dict[str, int] = {}
+        queue: deque = deque()
+        for s in seeds:
+            ranks[s] = 0
+            queue.append(s)
+
+        while queue:
+            nid = queue.popleft()
+            for nxt in neighbors.get(nid, set()):
+                if nxt in ranks:
+                    continue
+                ranks[nxt] = ranks[nid] + 1
+                queue.append(nxt)
+
+        for nid in node_ids:
+            if nid not in ranks:
+                ranks[nid] = 0
+        return ranks
+
+    def _assign_ancestor_weighted_levels(
+        self,
+        node_ids: List[str],
+        dep_map: Dict[str, List[str]],
+    ) -> Dict[str, int]:
+        """
+        Custom strategy:
+        Rank by number of unique upstream ancestors.
+        More dependent nodes are pushed further away.
+        """
+        predecessors: Dict[str, Set[str]] = {nid: set() for nid in node_ids}
+        for src, targets in dep_map.items():
+            for tgt in targets:
+                if tgt in predecessors and src in predecessors:
+                    predecessors[tgt].add(src)
+
+        memo: Dict[str, Set[str]] = {}
+
+        def ancestors(nid: str, trail: Set[str]) -> Set[str]:
+            if nid in memo:
+                return memo[nid]
+            if nid in trail:
+                return set()
+            trail = set(trail)
+            trail.add(nid)
+            result: Set[str] = set(predecessors.get(nid, set()))
+            for pred in predecessors.get(nid, set()):
+                result.update(ancestors(pred, trail))
+            memo[nid] = result
+            return result
+
+        ranks: Dict[str, int] = {}
+        for nid in node_ids:
+            ranks[nid] = len(ancestors(nid, set()))
+        return ranks
 
     # ── Rank assignment (longest-path layering) ───────────────────────────
 

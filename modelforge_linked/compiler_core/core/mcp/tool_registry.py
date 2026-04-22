@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from .server import ModelForgeMCPServer, MCPTool
+from ..llm.base import LLMTimeoutError, LLMRequestError, LLMResponseError
 from .tools import (
     plan_workflow, resolve_algorithms, build_expression,
     get_algorithm_docs, suggest_layout, generate_custom_step,
@@ -18,24 +19,52 @@ def build_server(llm_backend) -> ModelForgeMCPServer:
     llm_backend must implement:
         .chat(system_prompt: str, user_message: str) -> str
     """
-    def _call(tool_mod, args: dict) -> dict:
-        msg = tool_mod.build_user_message(args)
-        raw = llm_backend.chat(tool_mod.SYSTEM_PROMPT, msg)
-        raw = raw.strip()
+    def _extract_json_payload(raw_text: str) -> str:
+        raw = (raw_text or "").strip()
         if raw.startswith("```"):
             lines = raw.splitlines()
-            if lines[0].startswith("```"):
+            if lines and lines[0].startswith("```"):
                 lines = lines[1:]
             if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
             raw = "\n".join(lines).strip()
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError as e:
-            log.error("JSON decode error for %s: %s\nRaw: %r", tool_mod.__name__, e, raw[:400])
-            raise RuntimeError(
-                f"LLM returned invalid JSON for {tool_mod.__name__}: {e}"
-            ) from e
+
+        if raw.startswith("{") and raw.endswith("}"):
+            return raw
+
+        first = raw.find("{")
+        last = raw.rfind("}")
+        if first >= 0 and last > first:
+            return raw[first:last + 1].strip()
+        return raw
+
+    def _call(tool_mod, args: dict) -> dict:
+        base_message = tool_mod.build_user_message(args)
+        retry_suffix = "\n\nReturn only one valid JSON object. No prose, no markdown, no code fences."
+        attempts = 3
+
+        for attempt in range(1, attempts + 1):
+            message = base_message if attempt == 1 else (base_message + retry_suffix)
+            try:
+                raw = llm_backend.chat(tool_mod.SYSTEM_PROMPT, message)
+                payload = _extract_json_payload(raw)
+                return json.loads(payload)
+            except json.JSONDecodeError as e:
+                if attempt < attempts:
+                    continue
+                snippet = (_extract_json_payload(raw) if isinstance(raw, str) else "")[:400]
+                log.error("JSON decode error for %s: %s\nRaw: %r", tool_mod.__name__, e, snippet)
+                raise RuntimeError(
+                    f"Tool '{tool_mod.__name__}' returned invalid JSON after {attempts} attempts."
+                ) from e
+            except LLMTimeoutError as e:
+                if attempt < attempts:
+                    continue
+                raise RuntimeError(
+                    f"Tool '{tool_mod.__name__}' timed out after {attempts} attempts."
+                ) from e
+            except (LLMRequestError, LLMResponseError) as e:
+                raise RuntimeError(str(e)) from e
 
     tools = [
         MCPTool(

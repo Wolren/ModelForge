@@ -9,7 +9,6 @@ Model Forge main widget: Generate / Model / Settings tabs.
 
 import json
 import re
-import traceback
 
 from qgis.PyQt.QtCore import Qt, QThread, pyqtSignal, QSettings
 from qgis.PyQt.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
@@ -109,7 +108,7 @@ class GenerateWorker(QThread):
                 )
             self.finished.emit(result)
         except Exception as e:
-            self.error.emit(str(e) + "\n\n" + traceback.format_exc())
+            self.error.emit(str(e) or "Model generation failed.")
 
 
 class RepairWorker(QThread):
