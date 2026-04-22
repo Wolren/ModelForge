@@ -1,0 +1,11 @@
+# No mandatory external Python packages.
+# All stdlib (json, ast, urllib, re, dataclasses, enum, collections, importlib)
+# All QGIS bindings come from the QGIS Python environment.
+#
+# Optional LLM backends:
+# - Ollama:  no extra package needed (uses urllib.request)
+# - OpenAI:  no extra package needed (uses urllib.request)
+#
+# Optional development tools:
+# pytest>=7
+# pytest-qt

@@ -57,6 +57,17 @@ In the **Settings** tab:
 
 ### Repository layout
 
+Plugin variants in this monorepo:
+
+- `model_forge/` — legacy standalone plugin (classic dock workflow + direct LLM JSON generation).
+- `modelforge_arch/model_forge/` — architecture-first standalone plugin (MCP compiler + provider algorithms + custom step tooling).
+- `modelforge_linked/` and `modelforge-linked/` — stitched standalone plugin variants that bundle both legacy UI flow and architecture-first compiler stack in one package (no sibling-folder linking required).
+
+For the stitched standalone variant, `modelforge_linked/` is the canonical package (underscore). It includes:
+- runtime registration of generated custom steps under the plugin provider (`model_forge:<step_id>`),
+- contract-test fixture generation/execution for happy, boundary, and adversarial geometry/CRS cases,
+- extended auto-layout presets: `compact`, `balanced`, `dense`, `spacious`, `debug`.
+
 Key files and modules:
 
 - `model_forge.py`  
