@@ -1,0 +1,12 @@
+- the option to auto-run exemplary files to autotest the model
+- better fallback strategies for "optimize autofix" and rename it to just "auto-fix"
+- allow easier integration for automatically downloading needed files from web
+- caching of the conversation for faster and cheaper model refinements
+- Enhance context collection - Include layer schemas, few rows from attribute table, extents, CRS in LLM prompts
+- better integration with external libs: in settings autodetect
+ custom script folders and provider lists
+ so I can autoselect what's available beyond native options
+ instead of just guessing
+
+
+- NOT NOW: prebuilt workflows for common tasks

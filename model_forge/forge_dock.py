@@ -5,15 +5,16 @@ from .forge_widget import ForgeWidget
 
 class ForgeDock(QDockWidget):
 
-    def __init__(self, iface, parent=None):
+    def __init__(self, iface, plugin=None, parent=None):
         super().__init__("Model Forge", parent)
         self.iface = iface
+        self.plugin = plugin
         self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
-        self.setMinimumWidth(480)
+        self.setMinimumWidth(420)
         main_widget = QWidget()
         layout = QVBoxLayout()
         layout.setContentsMargins(4, 4, 4, 4)
-        self.forge_widget = ForgeWidget(iface)
+        self.forge_widget = ForgeWidget(iface, plugin=plugin)
         layout.addWidget(self.forge_widget)
         main_widget.setLayout(layout)
         self.setWidget(main_widget)

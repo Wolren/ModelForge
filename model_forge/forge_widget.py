@@ -1,521 +1,539 @@
-"""
-Model Forge main widget: Generate / Model / Settings tabs.
-- Editable color-coded JSON in Model tab
-- Debug/Improve prompt
-- Two-phase generation
-- Validation + auto-repair
-- Open in Model Designer
-"""
-
 import json
-import re
-import traceback
+from datetime import datetime
 
-from qgis.PyQt.QtCore import Qt, QThread, pyqtSignal, QSettings
-from qgis.PyQt.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
+from qgis.PyQt.QtCore import QThread, pyqtSignal, Qt, QSettings, QSize
 from qgis.PyQt.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
-    QPushButton, QCheckBox, QListWidget, QListWidgetItem,
-    QTextEdit, QLineEdit, QComboBox,
-    QMessageBox, QTabWidget, QAbstractItemView, QSlider,
-    QSpinBox, QFileDialog, QGridLayout, QProgressBar,
+    QHBoxLayout,
+    QLabel,
+    QComboBox,
+    QPushButton,
+    QMessageBox,
+    QCheckBox,
+    QWidget,
+    QVBoxLayout,
+    QListWidget,
+    QListWidgetItem,
+    QInputDialog,
 )
-from qgis.core import QgsProject
 
-from .context_collector import ContextCollector
-from .llm_backend import LLMBackend
-from .model_builder import ModelBuilder
-from .model_layout import compute_layout
-
-SETTINGS_PREFIX = "ModelForge/"
-
-
-class JsonHighlighter(QSyntaxHighlighter):
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.fmt_key = QTextCharFormat()
-        self.fmt_key.setForeground(QColor("#56B6C2"))
-        self.fmt_key.setFontWeight(QFont.Bold)
-
-        self.fmt_string = QTextCharFormat()
-        self.fmt_string.setForeground(QColor("#98C379"))
-
-        self.fmt_number = QTextCharFormat()
-        self.fmt_number.setForeground(QColor("#D19A66"))
-
-        self.fmt_keyword = QTextCharFormat()
-        self.fmt_keyword.setForeground(QColor("#C678DD"))
-
-        self.fmt_bracket = QTextCharFormat()
-        self.fmt_bracket.setForeground(QColor("#E06C75"))
-
-        self.fmt_alg_id = QTextCharFormat()
-        self.fmt_alg_id.setForeground(QColor("#61AFEF"))
-        self.fmt_alg_id.setFontWeight(QFont.Bold)
-
-    def highlightBlock(self, text):
-        for m in re.finditer(r'"(native:|gdal:|qgis:|saga:)[^"]*"', text):
-            self.setFormat(m.start(), m.end() - m.start(), self.fmt_alg_id)
-
-        for m in re.finditer(r'"([^"]*)"\s*:', text):
-            self.setFormat(m.start(), m.end() - m.start(), self.fmt_key)
-
-        for m in re.finditer(r':\s*"([^"]*)"', text):
-            already = False
-            for m2 in re.finditer(r'"(native:|gdal:|qgis:|saga:)[^"]*"', text):
-                if m.start(1) >= m2.start() and m.end(1) <= m2.end():
-                    already = True
-                    break
-            if not already:
-                self.setFormat(m.start(1) - 1, m.end(1) - m.start(1) + 2, self.fmt_string)
-
-        for m in re.finditer(r'\b(-?\d+\.?\d*)\b', text):
-            self.setFormat(m.start(), m.end() - m.start(), self.fmt_number)
-
-        for m in re.finditer(r'\b(true|false|null)\b', text):
-            self.setFormat(m.start(), m.end() - m.start(), self.fmt_keyword)
-
-        for m in re.finditer(r'[\[\]{}]', text):
-            self.setFormat(m.start(), 1, self.fmt_bracket)
+from .legacy_ui.forge_widget import ForgeWidget as LegacyForgeWidget
+from .compiler_core.ui.model_builder_bridge import ModelBuilderBridge
+from .compiler_core.ui.custom_step_dialog import CustomStepDialog
+from .compiler_core.core.context_collector import ContextCollector as CompilerContextCollector
+from .compiler_core.core.llm.factory import create_backend as create_compiler_backend
+from .compiler_core.core.mcp.client import DirectMCPClient
+from .compiler_core.core.mcp.tool_registry import build_server
+from .compiler_core.core.compiler.algorithm_resolver import AlgorithmResolver
+from .compiler_core.core.compiler.expression_validator import ExpressionValidator
+from .compiler_core.core.compiler.intent_parser import IntentParser
+from .compiler_core.core.compiler.ir_validator import IRValidator
+from .compiler_core.core.compiler.model_emitter import ModelEmitter
+from .compiler_core.core.compiler.pipeline import CompilerPipeline
+from .compiler_core.core.compiler.semantic_planner import SemanticPlanner
+from .compiler_core.core.ir import IssueLevel
+from .compiler_core.core.llm.base import LLMBackendError, LLMTimeoutError
+from .compiler_core.core.services.layout.graph_layout import GraphLayoutService
 
 
-class GenerateWorker(QThread):
-    finished = pyqtSignal(dict)
+class ForgeGenerateWorker(QThread):
+    finished = pyqtSignal(dict, list)
     error = pyqtSignal(str)
     progress = pyqtSignal(str)
+    cancelled = pyqtSignal()
 
-    def __init__(self, backend, description, model_name, model_group, context_text, two_phase=False):
+    def __init__(
+        self,
+        description,
+        model_name,
+        model_group,
+        llm_config,
+        layout_profile,
+        layout_orientation,
+        layout_algorithm,
+        selected_layer_ids,
+        algo_config,
+        optimize_generation,
+    ):
         super().__init__()
-        self.backend = backend
         self.description = description
         self.model_name = model_name
         self.model_group = model_group
-        self.context_text = context_text
-        self.two_phase = two_phase
+        self.llm_config = llm_config
+        self.layout_profile = layout_profile
+        self.layout_orientation = layout_orientation
+        self.layout_algorithm = layout_algorithm
+        self.selected_layer_ids = set(selected_layer_ids or [])
+        self.algo_config = algo_config or {}
+        self.optimize_generation = bool(optimize_generation)
+        self._is_cancelled = False
+
+    def request_cancel(self):
+        self._is_cancelled = True
 
     def run(self):
         try:
-            if self.two_phase:
-                self.progress.emit("Phase 1/2: Generating high-level plan...")
-                plan = self.backend.generate_plan(self.description, self.context_text)
-                self.progress.emit("Phase 2/2: Converting plan to model definition...")
-                result = self.backend.generate_model_from_plan(plan, self.context_text)
-                result["_plan"] = plan
-            else:
-                self.progress.emit("Generating model definition (single pass)...")
-                result = self.backend.generate_single_pass(
-                    self.description, self.model_name, self.model_group, self.context_text
-                )
-            self.finished.emit(result)
+            self.progress.emit("Connecting to LLM backend...")
+            if self._is_cancelled:
+                self.cancelled.emit()
+                return
+
+            llm = create_compiler_backend(self.llm_config)
+
+            self.progress.emit("Collecting QGIS context...")
+            if self._is_cancelled:
+                self.cancelled.emit()
+                return
+
+            max_algorithms = int(self.algo_config.get("max_algorithms", 60))
+            ctx = CompilerContextCollector().collect(max_algorithms=max_algorithms)
+            ctx["layers"] = self._filter_layers(ctx.get("layers", []))
+            ctx["algorithms"] = self._filter_algorithms(ctx.get("algorithms", {}))
+
+            if self._is_cancelled:
+                self.cancelled.emit()
+                return
+
+            server = build_server(llm)
+            client = DirectMCPClient(server)
+            pipeline = CompilerPipeline(
+                intent_parser=IntentParser(),
+                semantic_planner=SemanticPlanner(),
+                algorithm_resolver=AlgorithmResolver(),
+                expression_validator=ExpressionValidator(),
+                ir_validator=IRValidator(),
+                model_emitter=ModelEmitter(),
+            )
+
+            if self._is_cancelled:
+                self.cancelled.emit()
+                return
+
+            plan, model_json = self._run_optimized_pipeline(
+                pipeline=pipeline,
+                client=client,
+                full_context=ctx,
+            )
+
+            if self._is_cancelled:
+                self.cancelled.emit()
+                return
+
+            model_json = GraphLayoutService().layout_model_json(
+                model_json,
+                mode=self.layout_profile,
+                orientation=self.layout_orientation,
+                strategy=self.layout_algorithm,
+            )
+            self.finished.emit(model_json, plan.issues)
         except Exception as e:
-            self.error.emit(str(e) + "\n\n" + traceback.format_exc())
+            if self._is_cancelled:
+                self.cancelled.emit()
+                return
+            self.error.emit(self._friendly_error_text(e))
+
+    def _filter_layers(self, layers):
+        if not self.selected_layer_ids:
+            return layers
+        return [layer for layer in layers if layer.get("id") in self.selected_layer_ids]
+
+    def _filter_algorithms(self, algorithms):
+        if self.algo_config.get("include_all"):
+            return algorithms
+
+        enabled = set()
+        if self.algo_config.get("include_native"):
+            enabled.add("native")
+        if self.algo_config.get("include_gdal"):
+            enabled.add("gdal")
+        if self.algo_config.get("include_grass"):
+            enabled.add("grass")
+        if self.algo_config.get("include_saga"):
+            enabled.add("saga")
+
+        if not enabled:
+            return {}
 
-
-class RepairWorker(QThread):
-    finished = pyqtSignal(dict)
-    error = pyqtSignal(str)
-
-    def __init__(self, backend, workflow_json, errors, context_text):
-        super().__init__()
-        self.backend = backend
-        self.workflow_json = workflow_json
-        self.errors = errors
-        self.context_text = context_text
-
-    def run(self):
-        try:
-            result = self.backend.repair_model(self.workflow_json, self.errors, self.context_text)
-            self.finished.emit(result)
-        except Exception as e:
-            self.error.emit(str(e))
-
-
-class ForgeWidget(QWidget):
-
-    def __init__(self, iface, parent=None):
-        super().__init__(parent)
-        self.iface = iface
-        self.context_collector = ContextCollector()
-        self.backend = LLMBackend()
-        self.builder = ModelBuilder()
-        self._current_model_json = None
-        self.current_model = None
-        self.current_context_text = ""
-        self._designer_dlg = None
-        self.worker = None
-
-        self._load_settings()
-        self._init_ui()
-        self._load_layers()
-        self._connect_project_signals()
-
-    def _init_ui(self):
-        main_layout = QVBoxLayout()
-        main_layout.setSpacing(6)
-
-        self.tabs = QTabWidget()
-        self.tabs.addTab(self._create_generate_tab(), "Generate")
-        self.tabs.addTab(self._create_model_tab(), "Model")
-        self.tabs.addTab(self._create_settings_tab(), "Settings")
-        main_layout.addWidget(self.tabs)
-
-        self.status_label = QLabel("")
-        self.status_label.setWordWrap(True)
-        self.status_label.setStyleSheet("font-size: 9pt; color: gray;")
-        main_layout.addWidget(self.status_label)
-
-        self.setLayout(main_layout)
-
-    def _create_generate_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout()
-        layout.setSpacing(6)
-
-        desc_group = QGroupBox("Describe your workflow")
-        desc_layout = QVBoxLayout()
-        self.txt_description = QTextEdit()
-        self.txt_description.setPlaceholderText(
-            "e.g. Buffer input points by 500m, clip with boundary polygon, "
-            "then calculate area statistics..."
-        )
-        self.txt_description.setMinimumHeight(160)
-        self.txt_description.setMaximumHeight(220)
-        desc_layout.addWidget(self.txt_description)
-        desc_group.setLayout(desc_layout)
-        layout.addWidget(desc_group)
-
-        meta_layout = QHBoxLayout()
-        meta_layout.addWidget(QLabel("Name:"))
-        self.txt_model_name = QLineEdit("my_workflow")
-        meta_layout.addWidget(self.txt_model_name)
-        meta_layout.addWidget(QLabel("Group:"))
-        self.txt_model_group = QLineEdit("Model Forge")
-        meta_layout.addWidget(self.txt_model_group)
-        layout.addLayout(meta_layout)
-
-        layers_group = QGroupBox("Context layers")
-        layers_layout = QVBoxLayout()
-        layers_layout.setSpacing(4)
-        self.layer_list = QListWidget()
-        self.layer_list.setSelectionMode(QAbstractItemView.MultiSelection)
-        self.layer_list.setMaximumHeight(120)
-        layers_layout.addWidget(self.layer_list)
-
-        sel_btn_layout = QHBoxLayout()
-        btn_select_all = QPushButton("Select all")
-        btn_select_all.clicked.connect(self.layer_list.selectAll)
-        sel_btn_layout.addWidget(btn_select_all)
-        btn_deselect_all = QPushButton("Deselect all")
-        btn_deselect_all.clicked.connect(self.layer_list.clearSelection)
-        sel_btn_layout.addWidget(btn_deselect_all)
-        layers_layout.addLayout(sel_btn_layout)
-
-        layers_group.setLayout(layers_layout)
-        layout.addWidget(layers_group)
-
-        self.chk_two_phase = QCheckBox("Two-phase generation (plan then build)")
-        self.chk_two_phase.setChecked(False)
-        self.chk_two_phase.setToolTip(
-            "When checked, the LLM first creates a plan, then builds the model. "
-            "More reliable for complex workflows, but slower."
-        )
-        layout.addWidget(self.chk_two_phase)
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 0)
-        self.progress_bar.hide()
-        layout.addWidget(self.progress_bar)
-
-        self.lbl_status = QLabel("")
-        layout.addWidget(self.lbl_status)
-
-        # Generate button (no cancel — v3 style)
-        self.btn_generate = QPushButton("Generate Model")
-        self.btn_generate.setStyleSheet(
-            "QPushButton { background-color: #4CAF50; color: white; "
-            "font-weight: bold; padding: 8px; border-radius: 4px; } "
-            "QPushButton:hover { background-color: #45a049; }"
-        )
-        self.btn_generate.clicked.connect(self._on_generate)
-        layout.addWidget(self.btn_generate)
-
-        self.lbl_context_info = QLabel("")
-        self.lbl_context_info.setWordWrap(True)
-        self.lbl_context_info.setStyleSheet("color: gray; font-size: 10px;")
-        layout.addWidget(self.lbl_context_info)
-
-        layout.addStretch()
-        tab.setLayout(layout)
-        return tab
-
-    def _create_model_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout()
-        layout.setSpacing(6)
-
-        self.lbl_validity = QLabel("No model generated yet.")
-        self.lbl_validity.setWordWrap(True)
-        layout.addWidget(self.lbl_validity)
-
-        layout.addWidget(QLabel("Model JSON (editable):"))
-        self.txt_model_json = QTextEdit()
-        self.txt_model_json.setStyleSheet(
-            "QTextEdit { background-color: #282C34; color: #ABB2BF; "
-            "font-family: Consolas, monospace; font-size: 11px; }"
-        )
-        font = QFont("Consolas", 10)
-        font.setStyleHint(QFont.Monospace)
-        self.txt_model_json.setFont(font)
-        self.highlighter = JsonHighlighter(self.txt_model_json.document())
-        layout.addWidget(self.txt_model_json, stretch=3)
-
-        btn_row = QHBoxLayout()
-
-        self.btn_rebuild = QPushButton("Rebuild model from JSON above")
-        self.btn_rebuild.clicked.connect(self._on_rebuild_from_json)
-        self.btn_rebuild.setEnabled(False)
-        btn_row.addWidget(self.btn_rebuild)
-
-        self.btn_save = QPushButton("Save .model3")
-        self.btn_save.clicked.connect(self._save_model)
-        self.btn_save.setEnabled(False)
-        btn_row.addWidget(self.btn_save)
-
-        self.btn_open_designer = QPushButton("Open in Designer")
-        self.btn_open_designer.clicked.connect(self._on_open_designer)
-        self.btn_open_designer.setEnabled(False)
-        btn_row.addWidget(self.btn_open_designer)
-
-        layout.addLayout(btn_row)
-
-        improve_group = QGroupBox("Debug / Improve")
-        improve_layout = QVBoxLayout()
-        improve_layout.setSpacing(4)
-
-        self.txt_improve_prompt = QTextEdit()
-        self.txt_improve_prompt.setPlaceholderText(
-            "Describe what to fix, improve, or add to the current model...\n"
-            "e.g. 'Add a dissolve step after the buffer' or 'Fix the field name to population'"
-        )
-        self.txt_improve_prompt.setMaximumHeight(100)
-        improve_layout.addWidget(self.txt_improve_prompt)
-
-        improve_btn_layout = QHBoxLayout()
-        self.btn_auto_repair = QPushButton("Auto-Repair (validation)")
-        self.btn_auto_repair.setToolTip("Validate the JSON and ask the LLM to fix any errors")
-        self.btn_auto_repair.clicked.connect(self._on_auto_repair)
-        self.btn_auto_repair.setEnabled(False)
-        improve_btn_layout.addWidget(self.btn_auto_repair)
-
-        self.btn_improve = QPushButton("Send repair prompt")
-        self.btn_improve.setToolTip("Send the current JSON + your feedback to the LLM for improvement")
-        self.btn_improve.clicked.connect(self._on_improve)
-        self.btn_improve.setEnabled(False)
-        improve_btn_layout.addWidget(self.btn_improve)
-        improve_layout.addLayout(improve_btn_layout)
-
-        improve_group.setLayout(improve_layout)
-        layout.addWidget(improve_group)
-
-        tab.setLayout(layout)
-        return tab
-
-    def _create_settings_tab(self):
-        tab = QWidget()
-        layout = QVBoxLayout()
-        layout.setSpacing(6)
-
-        backend_group = QGroupBox("LLM Backend")
-        bg_layout = QGridLayout()
-        bg_layout.setSpacing(4)
-
-        bg_layout.addWidget(QLabel("Provider:"), 0, 0)
-        self.cmb_backend = QComboBox()
-        for key, info in LLMBackend.BACKENDS.items():
-            self.cmb_backend.addItem(info["label"], key)
-        self.cmb_backend.currentIndexChanged.connect(self._on_backend_changed)
-        bg_layout.addWidget(self.cmb_backend, 0, 1)
-
-        bg_layout.addWidget(QLabel("URL:"), 1, 0)
-        self.txt_url = QLineEdit("http://localhost:11434")
-        bg_layout.addWidget(self.txt_url, 1, 1)
-
-        bg_layout.addWidget(QLabel("API Key:"), 2, 0)
-        self.txt_api_key = QLineEdit()
-        self.txt_api_key.setEchoMode(QLineEdit.Password)
-        self.txt_api_key.setPlaceholderText("Not needed for Ollama")
-        bg_layout.addWidget(self.txt_api_key, 2, 1)
-
-        bg_layout.addWidget(QLabel("Model:"), 3, 0)
-        self.txt_model = QLineEdit("qwen2.5-coder:7b")
-        bg_layout.addWidget(self.txt_model, 3, 1)
-
-        bg_layout.addWidget(QLabel("Thinking level:"), 4, 0)
-        thinking_layout = QHBoxLayout()
-        self.sld_temperature = QSlider(Qt.Horizontal)
-        self.sld_temperature.setMinimum(0)
-        self.sld_temperature.setMaximum(10)
-        self.sld_temperature.setValue(2)
-        self.sld_temperature.setTickPosition(QSlider.TicksBelow)
-        self.sld_temperature.setTickInterval(1)
-        self.sld_temperature.valueChanged.connect(self._on_temperature_changed)
-        thinking_layout.addWidget(self.sld_temperature)
-        self.lbl_temperature = QLabel("0.2")
-        self.lbl_temperature.setMinimumWidth(30)
-        thinking_layout.addWidget(self.lbl_temperature)
-        bg_layout.addLayout(thinking_layout, 4, 1)
-
-        btn_test = QPushButton("Test Connection")
-        btn_test.clicked.connect(self._on_test_connection)
-        bg_layout.addWidget(btn_test, 5, 0, 1, 2)
-
-        backend_group.setLayout(bg_layout)
-        layout.addWidget(backend_group)
-
-        algo_group = QGroupBox("Algorithm Catalog")
-        algo_layout = QVBoxLayout()
-        algo_layout.setSpacing(4)
-
-        count_layout = QHBoxLayout()
-        count_layout.addWidget(QLabel("Max curated algorithms:"))
-        self.spn_max_algos = QSpinBox()
-        self.spn_max_algos.setMinimum(10)
-        self.spn_max_algos.setMaximum(500)
-        self.spn_max_algos.setValue(60)
-        self.spn_max_algos.setToolTip(
-            "Maximum number of algorithm signatures to include in the LLM context."
-        )
-        count_layout.addWidget(self.spn_max_algos)
-        algo_layout.addLayout(count_layout)
-
-        self.chk_include_all_native = QCheckBox("Include all native: algorithms")
-        self.chk_include_all_native.setChecked(True)
-        algo_layout.addWidget(self.chk_include_all_native)
-
-        self.chk_include_gdal = QCheckBox("Include gdal: algorithms")
-        self.chk_include_gdal.setChecked(True)
-        algo_layout.addWidget(self.chk_include_gdal)
-
-        self.chk_include_grass = QCheckBox("Include grass: algorithms")
-        self.chk_include_grass.setChecked(False)
-        algo_layout.addWidget(self.chk_include_grass)
-
-        self.chk_include_saga = QCheckBox("Include saga: algorithms")
-        self.chk_include_saga.setChecked(False)
-        algo_layout.addWidget(self.chk_include_saga)
-
-        self.chk_include_all_providers = QCheckBox("Include ALL providers (full registry scan)")
-        self.chk_include_all_providers.setChecked(False)
-        self.chk_include_all_providers.setToolTip(
-            "Scans the entire Processing registry. Slow and uses a lot of context."
-        )
-        algo_layout.addWidget(self.chk_include_all_providers)
-
-        algo_group.setLayout(algo_layout)
-        layout.addWidget(algo_group)
-
-        btn_apply = QPushButton("Apply Settings")
-        btn_apply.setStyleSheet("font-weight: bold;")
-        btn_apply.clicked.connect(self._apply_settings)
-        layout.addWidget(btn_apply)
-
-        layout.addStretch()
-        tab.setLayout(layout)
-
-        idx = self.cmb_backend.findData(self.saved_backend)
-        if idx >= 0:
-            self.cmb_backend.setCurrentIndex(idx)
-        self.txt_url.setText(self.saved_url)
-        self.txt_api_key.setText(self.saved_api_key)
-        self.txt_model.setText(self.saved_model)
-        self.sld_temperature.setValue(int(self.saved_temperature * 10))
-
-        return tab
-
-    def _load_layers(self):
-        self.layer_list.clear()
-        for layer in QgsProject.instance().mapLayers().values():
-            item = QListWidgetItem(layer.name())
-            item.setData(Qt.UserRole, layer)
-            self.layer_list.addItem(item)
-            item.setSelected(True)
-
-    def _connect_project_signals(self):
-        project = QgsProject.instance()
-        project.layersAdded.connect(lambda _: self._load_layers())
-        project.layersRemoved.connect(lambda _: self._load_layers())
-
-    def _get_selected_layers(self):
-        return [
-            self.layer_list.item(i).data(Qt.UserRole)
-            for i in range(self.layer_list.count())
-            if self.layer_list.item(i).isSelected()
-        ]
-
-    def _on_backend_changed(self, index):
-        key = self.cmb_backend.itemData(index)
-        profile = LLMBackend.BACKENDS.get(key, {})
-        self.txt_url.setText(profile.get("default_url", ""))
-        self.txt_model.setText(profile.get("default_model", ""))
-        needs_key = key != "ollama"
-        self.txt_api_key.setEnabled(needs_key)
-        self.txt_api_key.setPlaceholderText(
-            "Not needed for Ollama" if not needs_key else "Enter your API key"
-        )
-
-    def _on_temperature_changed(self, value):
-        temp = value / 10.0
-        self.lbl_temperature.setText(f"{temp:.1f}")
-
-    def _on_test_connection(self):
-        self._apply_settings()
-        if self.backend.test_connection():
-            QMessageBox.information(self, "Connection OK", "Successfully connected to the LLM backend.")
-        else:
-            QMessageBox.warning(self, "Connection Failed", "Could not connect. Check URL and API key.")
-
-    def _apply_settings(self):
-        key = self.cmb_backend.itemData(self.cmb_backend.currentIndex())
-        self.backend.configure(
-            backend=key,
-            url=self.txt_url.text().strip(),
-            api_key=self.txt_api_key.text().strip(),
-            model=self.txt_model.text().strip(),
-            temperature=self.sld_temperature.value() / 10.0,
-        )
-        self._save_settings()
-        self.status_label.setText("Settings applied.")
-
-    def _get_algo_config(self):
         return {
-            "max_algorithms": self.spn_max_algos.value(),
-            "include_native": self.chk_include_all_native.isChecked(),
-            "include_gdal": self.chk_include_gdal.isChecked(),
-            "include_grass": self.chk_include_grass.isChecked(),
-            "include_saga": self.chk_include_saga.isChecked(),
-            "include_all": self.chk_include_all_providers.isChecked(),
+            alg_id: alg
+            for alg_id, alg in algorithms.items()
+            if alg_id.split(":", 1)[0] in enabled
         }
 
-    def _load_settings(self):
-        s = QSettings()
-        self.saved_backend = s.value(SETTINGS_PREFIX + "backend", "ollama")
-        self.saved_url = s.value(SETTINGS_PREFIX + "url", "http://localhost:11434")
-        self.saved_api_key = s.value(SETTINGS_PREFIX + "api_key", "")
-        self.saved_model = s.value(SETTINGS_PREFIX + "model", "qwen2.5-coder:7b")
-        try:
-            self.saved_temperature = float(s.value(SETTINGS_PREFIX + "temperature", 0.2))
-        except (TypeError, ValueError):
-            self.saved_temperature = 0.2
+    def _run_optimized_pipeline(self, pipeline, client, full_context):
+        max_attempts = 3 if self.optimize_generation else 1
+        last_error = None
+        base_text = " ".join((self.description or "").split())
 
-    def _save_settings(self):
-        s = QSettings()
+        for attempt in range(max_attempts):
+            if self._is_cancelled:
+                self.cancelled.emit()
+                return None, {}
+
+            retry_index = attempt + 1
+            attempt_context = self._build_attempt_context(full_context, attempt)
+            attempt_text = self._build_attempt_prompt(base_text, last_error, attempt)
+
+            if attempt > 0:
+                self.progress.emit(f"Optimizing prompt and retrying ({retry_index}/{max_attempts})...")
+
+            if self._is_cancelled:
+                self.cancelled.emit()
+                return None, {}
+
+            try:
+                plan, model_json = pipeline.run(
+                    raw_text=attempt_text,
+                    model_name=self.model_name,
+                    model_group=self.model_group,
+                    qgis_context=attempt_context,
+                    mcp_client=client,
+                    progress_callback=lambda msg: self.progress.emit(msg),
+                )
+            except Exception as e:
+                if self._is_cancelled:
+                    self.cancelled.emit()
+                    return None, {}
+                last_error = e
+                if retry_index < max_attempts:
+                    continue
+                raise
+
+            if self._is_cancelled:
+                self.cancelled.emit()
+                return None, {}
+
+            error_issues = [i for i in plan.issues if i.level == IssueLevel.ERROR]
+            if error_issues and retry_index < max_attempts and self.optimize_generation:
+                last_error = RuntimeError(
+                    "; ".join(issue.message for issue in error_issues[:2])
+                )
+                continue
+
+            return plan, model_json
+
+        if last_error:
+            raise last_error
+        raise RuntimeError("Generation failed before a model could be produced.")
+
+    def _build_attempt_context(self, full_context, attempt):
+        if attempt <= 0:
+            return full_context
+
+        layers = list(full_context.get("layers", []))
+        slim_layers = []
+        for layer in layers[:8]:
+            item = dict(layer)
+            fields = list(item.get("fields", []))
+            if fields:
+                item["fields"] = fields[:8]
+            slim_layers.append(item)
+
+        algorithms = full_context.get("algorithms", {})
+        algo_items = list(algorithms.items())
+        if attempt == 1:
+            limit = min(len(algo_items), 40)
+        else:
+            limit = min(len(algo_items), 20)
+        slim_algorithms = dict(algo_items[:limit])
+
+        return {
+            "layers": slim_layers,
+            "algorithms": slim_algorithms,
+            "project_crs": full_context.get("project_crs"),
+            "canvas_extent": full_context.get("canvas_extent"),
+        }
+
+    def _build_attempt_prompt(self, base_text, last_error, attempt):
+        if attempt <= 0 or not last_error:
+            return base_text
+        return (
+            f"{base_text}\n\n"
+            f"Retry notes: {last_error}. "
+            "Use only algorithms present in the catalog. "
+            "Return a compact, valid plan."
+        )
+
+    def _friendly_error_text(self, error):
+        if isinstance(error, LLMTimeoutError):
+            return (
+                "The LLM request timed out after optimized retries. "
+                "Try a smaller model context or increase backend timeout."
+            )
+        if isinstance(error, LLMBackendError):
+            return str(error)
+        message = str(error).strip()
+        if not message:
+            return "Generation failed due to an unexpected error."
+        return message
+
+
+class ForgeWidget(LegacyForgeWidget):
+    def __init__(self, iface, plugin=None, parent=None):
+        super().__init__(iface, parent)
+        self.plugin = plugin
+        self.builder = ModelBuilderBridge()
+        self.current_plan_issues = []
+        self._history_entries = []
+        self._layout_syncing = False
+        self._load_compiler_settings()
+        self._inject_compiler_controls()
+
+    def _inject_compiler_controls(self):
+        self.chk_two_phase.setText("MCP compiler pipeline (enabled)")
+        self.chk_two_phase.setChecked(True)
+        self.chk_two_phase.setEnabled(False)
+        self.chk_two_phase.setToolTip(
+            "Uses the MCP compiler pipeline stages (parse, plan, resolve, validate, emit)."
+        )
+
+        layout_algorithms = ["sugiyama", "topological", "axis_pack", "radial_shell", "ancestor_weighted"]
+        compiler_controls = QHBoxLayout()
+        compiler_controls.setSpacing(4)
+        compiler_controls.addWidget(QLabel("Profile:"))
+        self.cmb_layout_profile_generate = QComboBox()
+        self.cmb_layout_profile_generate.addItems(["balanced", "compact", "dense", "spacious", "debug"])
+        self._configure_compact_combo(self.cmb_layout_profile_generate, 92, 7)
+        compiler_controls.addWidget(self.cmb_layout_profile_generate)
+        compiler_controls.addWidget(QLabel("Org:"))
+        self.cmb_layout_orientation_generate = QComboBox()
+        self.cmb_layout_orientation_generate.addItems(["horizontal", "vertical", "axis"])
+        self._configure_compact_combo(self.cmb_layout_orientation_generate, 90, 6)
+        compiler_controls.addWidget(self.cmb_layout_orientation_generate)
+        compiler_controls.addWidget(QLabel("Algo:"))
+        self.cmb_layout_algorithm_generate = QComboBox()
+        self.cmb_layout_algorithm_generate.addItems(layout_algorithms)
+        self._configure_compact_combo(self.cmb_layout_algorithm_generate, 130, 10)
+        compiler_controls.addWidget(self.cmb_layout_algorithm_generate)
+        compiler_controls.addStretch()
+
+        compiler_actions = QHBoxLayout()
+        compiler_actions.setSpacing(4)
+        self.chk_optimize = QCheckBox("Optimize auto-fix")
+        self.chk_optimize.setChecked(True)
+        self.chk_optimize.setToolTip(
+            "Automatically retries with tighter prompts and reduced context to avoid timeouts/errors."
+        )
+        compiler_actions.addWidget(self.chk_optimize)
+        compiler_actions.addStretch()
+        self.btn_custom_step = QPushButton("Custom Step...")
+        self.btn_custom_step.setMaximumWidth(110)
+        self.btn_custom_step.clicked.connect(self._on_open_custom_step_dialog)
+        compiler_actions.addWidget(self.btn_custom_step)
+
+        generate_layout = self.tabs.widget(0).layout()
+        progress_idx = generate_layout.indexOf(self.progress_bar)
+        if progress_idx >= 0:
+            generate_layout.insertLayout(progress_idx, compiler_actions)
+            generate_layout.insertLayout(progress_idx, compiler_controls)
+        else:
+            generate_layout.addLayout(compiler_controls)
+            generate_layout.addLayout(compiler_actions)
+
+        model_layout = self.tabs.widget(1).layout()
+        self.lbl_pipeline_issues = QLabel("")
+        self.lbl_pipeline_issues.setWordWrap(True)
+        self.lbl_pipeline_issues.setStyleSheet("color: gray;")
+        model_layout.insertWidget(1, self.lbl_pipeline_issues)
+
+        relayout_controls = QHBoxLayout()
+        relayout_controls.setSpacing(4)
+        relayout_controls.addWidget(QLabel("Profile:"))
+        self.cmb_layout_profile_model = QComboBox()
+        self.cmb_layout_profile_model.addItems(["balanced", "compact", "dense", "spacious", "debug"])
+        self._configure_compact_combo(self.cmb_layout_profile_model, 92, 7)
+        relayout_controls.addWidget(self.cmb_layout_profile_model)
+        relayout_controls.addWidget(QLabel("Org:"))
+        self.cmb_layout_orientation_model = QComboBox()
+        self.cmb_layout_orientation_model.addItems(["horizontal", "vertical", "axis"])
+        self._configure_compact_combo(self.cmb_layout_orientation_model, 90, 6)
+        relayout_controls.addWidget(self.cmb_layout_orientation_model)
+        relayout_controls.addWidget(QLabel("Algo:"))
+        self.cmb_layout_algorithm_model = QComboBox()
+        self.cmb_layout_algorithm_model.addItems(layout_algorithms)
+        self._configure_compact_combo(self.cmb_layout_algorithm_model, 130, 10)
+        relayout_controls.addWidget(self.cmb_layout_algorithm_model)
+        relayout_controls.addStretch()
+
+        relayout_actions = QHBoxLayout()
+        relayout_actions.setSpacing(4)
+        self.btn_auto_wire_steps = QPushButton("Auto-wire")
+        self.btn_auto_wire_steps.setMaximumWidth(100)
+        self.btn_auto_wire_steps.setToolTip(
+            "Autonomously wire missing algorithm parameters and output destinations."
+        )
+        self.btn_auto_wire_steps.clicked.connect(self._on_auto_wire_model)
+        self.btn_auto_wire_steps.setEnabled(False)
+        relayout_actions.addWidget(self.btn_auto_wire_steps)
+        self.btn_relayout_json = QPushButton("Re-layout")
+        self.btn_relayout_json.setMaximumWidth(90)
+        self.btn_relayout_json.setToolTip("Apply the selected layout mode without regenerating the model.")
+        self.btn_relayout_json.clicked.connect(self._on_relayout_json)
+        self.btn_relayout_json.setEnabled(False)
+        relayout_actions.addWidget(self.btn_relayout_json)
+        relayout_actions.addStretch()
+        model_layout.insertLayout(2, relayout_controls)
+        model_layout.insertLayout(3, relayout_actions)
+
+        self._inject_history_tab()
+        self._bind_layout_control_sync()
+        self._apply_saved_layout_settings()
+        self._refresh_history_list()
+
+    def _compiler_llm_config(self):
         key = self.cmb_backend.itemData(self.cmb_backend.currentIndex())
-        s.setValue(SETTINGS_PREFIX + "backend", key)
-        s.setValue(SETTINGS_PREFIX + "url", self.txt_url.text())
-        s.setValue(SETTINGS_PREFIX + "api_key", self.txt_api_key.text())
-        s.setValue(SETTINGS_PREFIX + "model", self.txt_model.text())
-        s.setValue(SETTINGS_PREFIX + "temperature", self.sld_temperature.value() / 10.0)
+        return {
+            "provider": key,
+            "base_url": self.txt_url.text().strip(),
+            "api_key": self.txt_api_key.text().strip(),
+            "model": self.txt_model.text().strip(),
+            "temperature": self.sld_temperature.value() / 10.0,
+            "timeout": 240 if key == "ollama" else 180,
+        }
+
+    def _bind_layout_control_sync(self):
+        self.cmb_layout_profile_generate.currentIndexChanged.connect(self._on_layout_control_changed)
+        self.cmb_layout_orientation_generate.currentIndexChanged.connect(self._on_layout_control_changed)
+        self.cmb_layout_algorithm_generate.currentIndexChanged.connect(self._on_layout_control_changed)
+        self.cmb_layout_profile_model.currentIndexChanged.connect(self._on_layout_control_changed)
+        self.cmb_layout_orientation_model.currentIndexChanged.connect(self._on_layout_control_changed)
+        self.cmb_layout_algorithm_model.currentIndexChanged.connect(self._on_layout_control_changed)
+
+    def _on_layout_control_changed(self):
+        if self._layout_syncing:
+            return
+
+        sender = self.sender()
+        profile = self._layout_control_value("profile", sender)
+        orientation = self._layout_control_value("orientation", sender)
+        algorithm = self._layout_control_value("algorithm", sender)
+
+        self._layout_syncing = True
+        try:
+            self._set_combo_value(self.cmb_layout_profile_generate, profile)
+            self._set_combo_value(self.cmb_layout_profile_model, profile)
+            self._set_combo_value(self.cmb_layout_orientation_generate, orientation)
+            self._set_combo_value(self.cmb_layout_orientation_model, orientation)
+            self._set_combo_value(self.cmb_layout_algorithm_generate, algorithm)
+            self._set_combo_value(self.cmb_layout_algorithm_model, algorithm)
+        finally:
+            self._layout_syncing = False
+        self._save_compiler_settings()
+
+    def _layout_control_value(self, kind, sender):
+        model_controls = (
+            self.cmb_layout_profile_model,
+            self.cmb_layout_orientation_model,
+            self.cmb_layout_algorithm_model,
+        )
+        if kind == "profile":
+            return self.cmb_layout_profile_model.currentText() if sender in model_controls else self.cmb_layout_profile_generate.currentText()
+        if kind == "orientation":
+            return self.cmb_layout_orientation_model.currentText() if sender in model_controls else self.cmb_layout_orientation_generate.currentText()
+        return self.cmb_layout_algorithm_model.currentText() if sender in model_controls else self.cmb_layout_algorithm_generate.currentText()
+
+    @staticmethod
+    def _set_combo_value(combo, value):
+        idx = combo.findText(value)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+
+    @staticmethod
+    def _configure_compact_combo(combo, max_width, min_chars):
+        combo.setMaximumWidth(int(max_width))
+        combo.setMinimumContentsLength(int(min_chars))
+        combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+
+    def _current_layout_options(self):
+        return {
+            "profile": self.cmb_layout_profile_generate.currentText(),
+            "orientation": self.cmb_layout_orientation_generate.currentText(),
+            "algorithm": self.cmb_layout_algorithm_generate.currentText(),
+        }
+
+    def _apply_layout(self, workflow):
+        options = self._current_layout_options()
+        return GraphLayoutService().layout_model_json(
+            workflow,
+            mode=options["profile"],
+            orientation=options["orientation"],
+            strategy=options["algorithm"],
+        )
+
+    def _load_compiler_settings(self):
+        s = QSettings()
+        self._saved_layout_profile = s.value(
+            "ModelForge/layout_profile",
+            s.value("ModelForge/Linked/layout_profile", "balanced"),
+        )
+        self._saved_layout_orientation = s.value(
+            "ModelForge/layout_orientation",
+            s.value("ModelForge/Linked/layout_orientation", "horizontal"),
+        )
+        self._saved_layout_algorithm = s.value(
+            "ModelForge/layout_algorithm",
+            s.value("ModelForge/Linked/layout_algorithm", "sugiyama"),
+        )
+        history_raw = s.value(
+            "ModelForge/generation_history",
+            s.value("ModelForge/Linked/generation_history", "[]"),
+        )
+        try:
+            self._history_entries = json.loads(history_raw) if history_raw else []
+            if not isinstance(self._history_entries, list):
+                self._history_entries = []
+        except Exception:
+            self._history_entries = []
+
+    def _save_compiler_settings(self):
+        s = QSettings()
+        s.setValue("ModelForge/layout_profile", self.cmb_layout_profile_generate.currentText())
+        s.setValue("ModelForge/layout_orientation", self.cmb_layout_orientation_generate.currentText())
+        s.setValue("ModelForge/layout_algorithm", self.cmb_layout_algorithm_generate.currentText())
+        s.setValue("ModelForge/generation_history", json.dumps(self._history_entries, ensure_ascii=False))
+
+    def _apply_saved_layout_settings(self):
+        self._layout_syncing = True
+        try:
+            self._set_combo_value(self.cmb_layout_profile_generate, self._saved_layout_profile)
+            self._set_combo_value(self.cmb_layout_profile_model, self._saved_layout_profile)
+            self._set_combo_value(self.cmb_layout_orientation_generate, self._saved_layout_orientation)
+            self._set_combo_value(self.cmb_layout_orientation_model, self._saved_layout_orientation)
+            self._set_combo_value(self.cmb_layout_algorithm_generate, self._saved_layout_algorithm)
+            self._set_combo_value(self.cmb_layout_algorithm_model, self._saved_layout_algorithm)
+        finally:
+            self._layout_syncing = False
+
+    def _inject_history_tab(self):
+        history_tab = QWidget()
+        history_layout = QVBoxLayout()
+        history_layout.setSpacing(6)
+        history_layout.addWidget(QLabel("Past generation attempts"))
+        self.lst_history = QListWidget()
+        self.lst_history.setSelectionMode(QListWidget.SingleSelection)
+        self.lst_history.setStyleSheet(
+            "QListWidget::item { padding: 8px; margin: 4px; border: 1px solid #4a4a4a; border-radius: 6px; }"
+            "QListWidget::item:selected { background: #2b3a55; border: 1px solid #6a8ac7; }"
+        )
+        history_layout.addWidget(self.lst_history, stretch=1)
+
+        btn_row = QHBoxLayout()
+        self.btn_history_load = QPushButton("Load selected")
+        self.btn_history_load.clicked.connect(self._on_load_history_entry)
+        btn_row.addWidget(self.btn_history_load)
+        self.btn_history_delete = QPushButton("Delete selected")
+        self.btn_history_delete.clicked.connect(self._on_delete_history_entry)
+        btn_row.addWidget(self.btn_history_delete)
+        self.btn_history_rename = QPushButton("Rename selected")
+        self.btn_history_rename.clicked.connect(self._on_rename_history_entry)
+        btn_row.addWidget(self.btn_history_rename)
+        self.btn_history_clear = QPushButton("Clear history")
+        self.btn_history_clear.clicked.connect(self._on_clear_history)
+        btn_row.addWidget(self.btn_history_clear)
+        btn_row.addStretch()
+        history_layout.addLayout(btn_row)
+
+        history_tab.setLayout(history_layout)
+        self.tabs.insertTab(2, history_tab, "History")
 
     def _on_generate(self):
         description = self.txt_description.toPlainText().strip()
@@ -526,31 +544,61 @@ class ForgeWidget(QWidget):
         self._apply_settings()
 
         selected_layers = self._get_selected_layers()
+        selected_layer_ids = [layer.id() for layer in selected_layers if layer is not None]
         algo_config = self._get_algo_config()
         self.current_context_text = self.context_collector.collect(selected_layers, algo_config)
 
         self.btn_generate.setEnabled(False)
         self.progress_bar.show()
         self.lbl_status.setText("Starting generation...")
+        self.lbl_pipeline_issues.setText("")
 
-        self.worker = GenerateWorker(
-            self.backend, description,
-            self.txt_model_name.text(), self.txt_model_group.text(),
-            self.current_context_text,
-            two_phase=self.chk_two_phase.isChecked(),
+        self.worker = ForgeGenerateWorker(
+            description=description,
+            model_name=self.txt_model_name.text(),
+            model_group=self.txt_model_group.text(),
+            llm_config=self._compiler_llm_config(),
+            layout_profile=self.cmb_layout_profile_generate.currentText(),
+            layout_orientation=self.cmb_layout_orientation_generate.currentText(),
+            layout_algorithm=self.cmb_layout_algorithm_generate.currentText(),
+            selected_layer_ids=selected_layer_ids,
+            algo_config=algo_config,
+            optimize_generation=self.chk_optimize.isChecked(),
         )
         self.worker.progress.connect(lambda msg: self.lbl_status.setText(msg))
         self.worker.finished.connect(self._on_generate_finished)
         self.worker.error.connect(self._on_generate_error)
+        self.worker.cancelled.connect(self._on_generate_cancelled)
+        # Swap buttons
+        self.btn_generate.setVisible(False)
+        self.btn_cancel.setVisible(True)
         self.worker.start()
 
-    def _on_generate_finished(self, workflow):
+    def _on_cancel_generate(self):
+        if self.worker and self.worker.isRunning():
+            self.worker.request_cancel()
+            self.lbl_status.setText("Cancelling...")
+            self.btn_cancel.setEnabled(False)
+
+    def _on_generate_cancelled(self):
         self.progress_bar.hide()
+        self.btn_generate.setVisible(True)
         self.btn_generate.setEnabled(True)
+        self.btn_cancel.setVisible(False)
+        self.lbl_status.setText("Generation cancelled.")
+        self._current_model_json = None
 
-        plan = workflow.pop("_plan", None)
+    def _on_generate_finished(self, workflow, issues):
+        self.progress_bar.hide()
+        self.btn_generate.setVisible(True)
+        self.btn_generate.setEnabled(True)
+        self.btn_cancel.setVisible(False)
+        self.current_plan_issues = issues or []
+        self._update_issue_summary()
 
-        if "inputs" not in workflow or "algorithms" not in workflow:
+        if not workflow or "inputs" not in workflow or "algorithms" not in workflow:
+            self.lbl_status.setText("Generation cancelled or invalid response.")
+            return
             self.lbl_status.setText("LLM response missing required keys.")
             raw_text = json.dumps(workflow, indent=2, ensure_ascii=False)
             self.txt_model_json.setPlainText(raw_text)
@@ -561,7 +609,10 @@ class ForgeWidget(QWidget):
             self.tabs.setCurrentIndex(1)
             return
 
-        workflow = compute_layout(workflow)
+        workflow = self.builder.auto_wire_model_json(
+            workflow,
+            prefer_project_outputs=True,
+        )
         self._current_model_json = workflow
         self.lbl_status.setText("Model generated! See Model tab.")
 
@@ -571,51 +622,146 @@ class ForgeWidget(QWidget):
         self.btn_rebuild.setEnabled(True)
         self.btn_improve.setEnabled(True)
         self.btn_auto_repair.setEnabled(True)
+        self.btn_auto_wire_steps.setEnabled(True)
+        self.btn_relayout_json.setEnabled(True)
         self.tabs.setCurrentIndex(1)
 
+        self._record_history_entry(workflow)
         self._try_build_model(workflow)
 
     def _on_generate_error(self, error_msg):
         self.progress_bar.hide()
+        self.btn_generate.setVisible(True)
         self.btn_generate.setEnabled(True)
+        self.btn_cancel.setVisible(False)
+        self.btn_auto_wire_steps.setEnabled(bool(self._current_model_json))
+        self.btn_relayout_json.setEnabled(bool(self._current_model_json))
         self.lbl_status.setText("Generation failed.")
+        QMessageBox.critical(self, "Generation Error", error_msg)
 
-        # Try to show raw LLM text if it's embedded in the error
-        if "Raw response snippet:" in error_msg:
-            parts = error_msg.split("Raw response snippet:\n\n", 1)
-            msg = parts[0].strip()
-            raw = parts[1] if len(parts) > 1 else ""
-            if raw:
-                self.txt_model_json.setPlainText(raw)
-                self.lbl_validity.setText(
-                    "\u26a0 Invalid JSON. Raw LLM response shown for debugging.\n" + msg
-                )
-                self.lbl_validity.setStyleSheet("color: orange; font-weight: bold;")
-                self.tabs.setCurrentIndex(1)
-                return
+    def _update_issue_summary(self):
+        if not self.current_plan_issues:
+            self.lbl_pipeline_issues.setText("Compiler issues: none.")
+            self.lbl_pipeline_issues.setStyleSheet("color: #4CAF50;")
+            return
 
-        QMessageBox.critical(self, "Generation Error", "Error generating model:\n" + error_msg)
+        counts = {"error": 0, "warning": 0, "info": 0}
+        lines = []
+        for issue in self.current_plan_issues:
+            level = issue.level.value if hasattr(issue.level, "value") else str(issue.level)
+            counts[level] = counts.get(level, 0) + 1
+            icon = "❌" if issue.level == IssueLevel.ERROR else ("⚠️" if issue.level == IssueLevel.WARNING else "ℹ️")
+            lines.append(f"{icon} [{issue.code}] {issue.message}")
 
-    def _try_build_model(self, workflow):
-        try:
-            model = self.builder.build_model(
-                workflow,
-                model_name=self.txt_model_name.text(),
-                model_group=self.txt_model_group.text(),
-            )
-            self.current_model = model
-            self.btn_save.setEnabled(True)
-            self.btn_open_designer.setEnabled(True)
-        except Exception as e:
-            self.current_model = None
-            self.btn_save.setEnabled(False)
-            self.btn_open_designer.setEnabled(False)
-            self.status_label.setText("Build warning: " + str(e))
+        summary = (
+            f"Compiler issues — errors: {counts.get('error', 0)}, "
+            f"warnings: {counts.get('warning', 0)}, "
+            f"info: {counts.get('info', 0)}"
+        )
+        details = "\n".join(lines[:4])
+        if len(lines) > 4:
+            details += f"\n...and {len(lines) - 4} more."
 
-    def _on_rebuild_from_json(self):
+        self.lbl_pipeline_issues.setText(f"{summary}\n{details}")
+        self.lbl_pipeline_issues.setStyleSheet(
+            "color: red;" if counts.get("error", 0) else "color: #b58900;"
+        )
+
+    def _ensure_model_from_editor(self):
+        if self.current_model is not None:
+            return self.current_model
+
         text = self.txt_model_json.toPlainText().strip()
         if not text:
-            QMessageBox.warning(self, "Model Forge", "JSON is empty.")
+            raise ValueError("No model JSON available.")
+
+        workflow = json.loads(text)
+        if "inputs" not in workflow or "algorithms" not in workflow:
+            raise ValueError("JSON must contain 'inputs' and 'algorithms'.")
+
+        workflow = self.builder.auto_wire_model_json(
+            workflow,
+            prefer_project_outputs=True,
+        )
+        self._current_model_json = workflow
+        self.current_model = self.builder.load_model_json(workflow, open_designer=False)
+        return self.current_model
+
+    def _save_model(self):
+        from qgis.PyQt.QtWidgets import QFileDialog
+
+        try:
+            model = self._ensure_model_from_editor()
+        except json.JSONDecodeError as e:
+            QMessageBox.warning(self, "JSON Error", "Invalid JSON:\n" + str(e))
+            return
+        except Exception as e:
+            QMessageBox.warning(self, "Model Forge", str(e))
+            return
+
+        path, _ = QFileDialog.getSaveFileName(self, "Save Model", "", "QGIS Models (*.model3)")
+        if not path:
+            return
+        if not path.endswith(".model3"):
+            path += ".model3"
+
+        model.setSourceFilePath(path)
+        if model.toFile(path):
+            QMessageBox.information(self, "Model Forge", "Model saved to:\n" + path)
+        else:
+            QMessageBox.warning(self, "Model Forge", "Failed to save model.")
+
+    def _on_open_designer(self):
+        try:
+            workflow = self._workflow_from_editor_for_designer()
+            self._open_designer_dialog(workflow)
+        except json.JSONDecodeError as e:
+            QMessageBox.warning(self, "JSON Error", "Invalid JSON:\n" + str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "Model Forge", "Could not open Designer:\n" + str(e))
+
+    def _workflow_from_editor_for_designer(self):
+        text = self.txt_model_json.toPlainText().strip()
+        if not text:
+            raise ValueError("No model JSON available.")
+        workflow = json.loads(text)
+        if "inputs" not in workflow or "algorithms" not in workflow:
+            raise ValueError("JSON must contain 'inputs' and 'algorithms'.")
+        workflow = self.builder.auto_wire_model_json(
+            workflow,
+            prefer_project_outputs=True,
+        )
+        workflow = self._apply_layout(workflow)
+        self._current_model_json = workflow
+        self.txt_model_json.setPlainText(json.dumps(workflow, indent=2, ensure_ascii=False))
+        return workflow
+
+    def _open_designer_dialog(self, workflow):
+        from processing.modeler.ModelerDialog import ModelerDialog
+
+        model = self.builder.load_model_json(workflow, open_designer=False)
+        self.current_model = model
+        dlg = ModelerDialog.create(model)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        self._designer_dlg = dlg
+
+    def _on_open_custom_step_dialog(self):
+        try:
+            dlg = CustomStepDialog(parent=self)
+            if dlg.exec():
+                py_path = getattr(dlg, "generated_py_path", None)
+                if py_path and self.plugin is not None:
+                    alg_id = self.plugin.register_generated_step(py_path)
+                    self.lbl_status.setText(f"Registered custom step: {alg_id}")
+        except Exception as e:
+            QMessageBox.critical(self, "Model Forge", f"Could not open Custom Step Author:\n{e}")
+
+    def _on_relayout_json(self):
+        text = self.txt_model_json.toPlainText().strip()
+        if not text:
+            QMessageBox.warning(self, "Model Forge", "No model JSON available to re-layout.")
             return
         try:
             workflow = json.loads(text)
@@ -624,200 +770,151 @@ class ForgeWidget(QWidget):
             return
 
         if "inputs" not in workflow or "algorithms" not in workflow:
-            QMessageBox.warning(self, "Model Forge",
-                                "JSON must have 'inputs' and 'algorithms' keys.")
+            QMessageBox.warning(
+                self,
+                "Model Forge",
+                "JSON must contain 'inputs' and 'algorithms' before layout can be applied.",
+            )
             return
+
+        self._on_layout_control_changed()
+        workflow = self._apply_layout(workflow)
+        workflow = self.builder.auto_wire_model_json(
+            workflow,
+            prefer_project_outputs=True,
+        )
+        self._current_model_json = workflow
+        self.txt_model_json.setPlainText(json.dumps(workflow, indent=2, ensure_ascii=False))
+        self.lbl_status.setText("Applied layout to current JSON.")
+        self.lbl_validity.setText("\u2713 Layout updated without regeneration.")
+        self.lbl_validity.setStyleSheet("color: #4CAF50; font-weight: bold;")
+        self._try_build_model(workflow)
+
+    def _on_auto_wire_model(self):
+        text = self.txt_model_json.toPlainText().strip()
+        if not text:
+            QMessageBox.warning(self, "Model Forge", "No model JSON available to auto-wire.")
+            return
+        try:
+            workflow = json.loads(text)
+        except json.JSONDecodeError as e:
+            QMessageBox.warning(self, "JSON Error", "Invalid JSON:\n" + str(e))
+            return
+
+        workflow = self.builder.auto_wire_model_json(
+            workflow,
+            prefer_project_outputs=True,
+        )
+        workflow = self._apply_layout(workflow)
+        self._current_model_json = workflow
+        self.txt_model_json.setPlainText(json.dumps(workflow, indent=2, ensure_ascii=False))
+        self.lbl_status.setText("Auto-wired model steps and output destinations.")
+        self.lbl_validity.setText("\u2713 Autonomous wiring applied.")
+        self.lbl_validity.setStyleSheet("color: #4CAF50; font-weight: bold;")
+        self._try_build_model(workflow)
+
+    def _record_history_entry(self, workflow):
+        entry = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "title": workflow.get("model_name", "workflow"),
+            "model_name": workflow.get("model_name", "workflow"),
+            "model_group": workflow.get("model_group", "ModelForge"),
+            "algorithm_count": len(workflow.get("algorithms", [])),
+            "input_count": len(workflow.get("inputs", [])),
+            "layout_profile": self.cmb_layout_profile_generate.currentText(),
+            "layout_orientation": self.cmb_layout_orientation_generate.currentText(),
+            "layout_algorithm": self.cmb_layout_algorithm_generate.currentText(),
+            "workflow": workflow,
+        }
+        self._history_entries.insert(0, entry)
+        self._history_entries = self._history_entries[:30]
+        self._save_compiler_settings()
+        self._refresh_history_list()
+
+    def _refresh_history_list(self):
+        if not hasattr(self, "lst_history"):
+            return
+        self.lst_history.clear()
+        for idx, entry in enumerate(self._history_entries):
+            title = entry.get("title") or entry.get("model_name", "workflow")
+            text = (
+                f"{title}\n"
+                f"{entry.get('timestamp', '?')} | "
+                f"{entry.get('model_name', 'workflow')} "
+                f"({entry.get('algorithm_count', 0)} steps)\n"
+                f"layout={entry.get('layout_profile', 'balanced')}/{entry.get('layout_orientation', 'horizontal')}/"
+                f"{entry.get('layout_algorithm', 'sugiyama')}"
+            )
+            item = QListWidgetItem(text)
+            item.setData(Qt.UserRole, idx)
+            item.setSizeHint(QSize(0, 68))
+            self.lst_history.addItem(item)
+
+    def _selected_history_index(self):
+        item = self.lst_history.currentItem() if hasattr(self, "lst_history") else None
+        if item is None:
+            return None
+        idx = item.data(Qt.UserRole)
+        if idx is None or idx < 0 or idx >= len(self._history_entries):
+            return None
+        return idx
+
+    def _on_load_history_entry(self):
+        idx = self._selected_history_index()
+        if idx is None:
+            QMessageBox.information(self, "History", "Select a history item first.")
+            return
+        entry = self._history_entries[idx]
+        workflow = entry.get("workflow", {})
+        if not isinstance(workflow, dict):
+            QMessageBox.warning(self, "History", "Selected history entry is invalid.")
+            return
+
+        self._set_combo_value(self.cmb_layout_profile_generate, entry.get("layout_profile", "balanced"))
+        self._set_combo_value(self.cmb_layout_orientation_generate, entry.get("layout_orientation", "horizontal"))
+        self._set_combo_value(self.cmb_layout_algorithm_generate, entry.get("layout_algorithm", "sugiyama"))
+        self._on_layout_control_changed()
 
         self._current_model_json = workflow
+        self.txt_model_json.setPlainText(json.dumps(workflow, indent=2, ensure_ascii=False))
+        self.btn_rebuild.setEnabled(True)
+        self.btn_auto_wire_steps.setEnabled(True)
+        self.btn_relayout_json.setEnabled(True)
+        self.tabs.setCurrentIndex(1)
         self._try_build_model(workflow)
-        self.lbl_validity.setText("\u2713 Model rebuilt from edited JSON.")
-        self.lbl_validity.setStyleSheet("color: #4CAF50; font-weight: bold;")
+        self.lbl_status.setText("Loaded model from history.")
 
-    def _copy_json(self):
-        from qgis.PyQt.QtWidgets import QApplication
-        QApplication.clipboard().setText(self.txt_model_json.toPlainText())
-        self.status_label.setText("JSON copied to clipboard.")
-
-    def _save_model(self):
-        if not self.current_model:
-            text = self.txt_model_json.toPlainText().strip()
-            if not text:
-                QMessageBox.warning(self, "Empty", "No model JSON to save.")
-                return
-            path, _ = QFileDialog.getSaveFileName(self, "Save Model", "", "QGIS Model (*.model3)")
-            if path:
-                if not path.endswith(".model3"):
-                    path += ".model3"
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(text)
-                self.status_label.setText(f"JSON saved to {path}")
+    def _on_delete_history_entry(self):
+        idx = self._selected_history_index()
+        if idx is None:
+            QMessageBox.information(self, "History", "Select a history item first.")
             return
+        del self._history_entries[idx]
+        self._save_compiler_settings()
+        self._refresh_history_list()
 
-        path, _ = QFileDialog.getSaveFileName(self, "Save Model", "", "QGIS Models (*.model3)")
-        if path:
-            if not path.endswith(".model3"):
-                path += ".model3"
-            self.current_model.setSourceFilePath(path)
-            if self.current_model.toFile(path):
-                QMessageBox.information(self, "Model Forge", "Model saved to:\n" + path)
-            else:
-                QMessageBox.warning(self, "Model Forge", "Failed to save model.")
-
-    def _on_open_designer(self):
-        """Open the current model in QGIS Model Designer."""
-        import tempfile
-        from qgis.core import QgsProcessingModelAlgorithm
-        from processing.modeler.ModelerDialog import ModelerDialog
-
-        if not self._current_model_json:
-            QMessageBox.warning(self, "Model Forge", "No current workflow to open.")
+    def _on_rename_history_entry(self):
+        idx = self._selected_history_index()
+        if idx is None:
+            QMessageBox.information(self, "History", "Select a history item first.")
             return
-
-        try:
-            model = self.builder.build_model(
-                self._current_model_json,
-                self.txt_model_name.text(),
-                self.txt_model_group.text(),
-            )
-
-            tmp = tempfile.NamedTemporaryFile(suffix=".model3", delete=False)
-            tmp_path = tmp.name
-            tmp.close()
-
-            if not model.toFile(tmp_path):
-                QMessageBox.warning(self, "Model Forge",
-                                    "Could not create temporary model file.")
-                return
-
-            file_model = QgsProcessingModelAlgorithm()
-            file_model.fromFile(tmp_path)
-
-            dlg = ModelerDialog(file_model)
-            dlg.show()
-            dlg.raise_()
-            dlg.activateWindow()
-            self._designer_dlg = dlg
-
-        except Exception as e:
-            QMessageBox.critical(
-                self, "Model Forge",
-                "Could not open Designer:\n" + str(e),
-            )
-
-    def _on_auto_repair(self):
-        text = self.txt_model_json.toPlainText().strip()
-        if not text:
-            QMessageBox.warning(self, "Empty", "No model JSON to repair.")
+        current = self._history_entries[idx]
+        old_title = current.get("title") or current.get("model_name", "workflow")
+        new_title, ok = QInputDialog.getText(self, "Rename History Item", "New name:", text=old_title)
+        if not ok:
             return
-        try:
-            workflow = json.loads(text)
-        except json.JSONDecodeError as e:
-            QMessageBox.warning(self, "Invalid JSON", f"Cannot parse JSON: {e}")
+        new_title = (new_title or "").strip()
+        if not new_title:
+            QMessageBox.information(self, "History", "Name cannot be empty.")
             return
+        current["title"] = new_title
+        self._save_compiler_settings()
+        self._refresh_history_list()
 
-        errors = self._validate_model(workflow)
-        if not errors:
-            QMessageBox.information(self, "Valid", "No validation errors found.")
+    def _on_clear_history(self):
+        if not self._history_entries:
             return
+        self._history_entries = []
+        self._save_compiler_settings()
+        self._refresh_history_list()
 
-        self._apply_settings()
-        self.lbl_validity.setText("Sending repair request to LLM...")
-        self.lbl_validity.setStyleSheet("color: #2196F3;")
-        self.progress_bar.show()
-        self.btn_auto_repair.setEnabled(False)
-        self.btn_improve.setEnabled(False)
-
-        self.repair_worker = RepairWorker(
-            self.backend, workflow, errors, self.current_context_text,
-        )
-        self.repair_worker.finished.connect(self._on_repair_finished)
-        self.repair_worker.error.connect(self._on_repair_error)
-        self.repair_worker.start()
-
-    def _on_improve(self):
-        text = self.txt_model_json.toPlainText().strip()
-        feedback = self.txt_improve_prompt.toPlainText().strip()
-        if not text:
-            QMessageBox.warning(self, "Empty", "No model JSON to improve.")
-            return
-        if not feedback:
-            QMessageBox.warning(self, "No Feedback", "Please describe what to fix or improve.")
-            return
-
-        try:
-            workflow = json.loads(text)
-        except json.JSONDecodeError as e:
-            QMessageBox.warning(self, "Invalid JSON", f"Cannot parse current JSON: {e}")
-            return
-
-        self._apply_settings()
-        self.lbl_validity.setText("Improving model...")
-        self.lbl_validity.setStyleSheet("color: #2196F3;")
-        self.progress_bar.show()
-        self.btn_auto_repair.setEnabled(False)
-        self.btn_improve.setEnabled(False)
-
-        errors = self._validate_model(workflow)
-        all_errors = errors + [f"USER FEEDBACK: {feedback}"]
-
-        self.repair_worker = RepairWorker(
-            self.backend, workflow, all_errors, self.current_context_text,
-        )
-        self.repair_worker.finished.connect(self._on_repair_finished)
-        self.repair_worker.error.connect(self._on_repair_error)
-        self.repair_worker.start()
-
-    def _on_repair_finished(self, repaired):
-        self.progress_bar.hide()
-        self.btn_auto_repair.setEnabled(True)
-        self.btn_improve.setEnabled(True)
-
-        if "inputs" not in repaired or "algorithms" not in repaired:
-            self.lbl_validity.setText("Repair response missing required keys.")
-            self.lbl_validity.setStyleSheet("color: red;")
-            raw_text = json.dumps(repaired, indent=2, ensure_ascii=False)
-            self.txt_model_json.setPlainText(raw_text)
-            return
-
-        repaired = compute_layout(repaired)
-        self._current_model_json = repaired
-        self.txt_model_json.setPlainText(json.dumps(repaired, indent=2, ensure_ascii=False))
-        self.lbl_validity.setText("\u2713 Model repaired/improved.")
-        self.lbl_validity.setStyleSheet("color: #4CAF50; font-weight: bold;")
-        self.status_label.setText("Model improved successfully.")
-        self._try_build_model(repaired)
-
-    def _on_repair_error(self, error_msg):
-        self.progress_bar.hide()
-        self.btn_auto_repair.setEnabled(True)
-        self.btn_improve.setEnabled(True)
-        self.lbl_validity.setText("Repair failed: " + error_msg)
-        self.lbl_validity.setStyleSheet("color: red;")
-
-    def _validate_model(self, workflow):
-        """Basic structural validation. Returns list of error strings."""
-        errors = []
-        if "inputs" not in workflow:
-            errors.append("Missing 'inputs' key.")
-        if "algorithms" not in workflow:
-            errors.append("Missing 'algorithms' key.")
-        algos = workflow.get("algorithms", [])
-        ids = set()
-        for a in algos:
-            if "id" not in a:
-                errors.append(f"Algorithm missing 'id': {a.get('description', '?')}")
-            elif a["id"] in ids:
-                errors.append(f"Duplicate algorithm id: {a['id']}")
-            else:
-                ids.add(a["id"])
-            if "algorithm_id" not in a:
-                errors.append(f"Algorithm '{a.get('id', '?')}' missing 'algorithm_id'.")
-            for pname, pval in a.get("parameters", {}).items():
-                if isinstance(pval, dict) and pval.get("type") == "child_output":
-                    ref = pval.get("child_id")
-                    if ref and ref not in ids and ref not in [x["id"] for x in algos]:
-                        errors.append(
-                            f"Algorithm '{a.get('id')}' param '{pname}' references "
-                            f"unknown child_id '{ref}'."
-                        )
-        return errors
