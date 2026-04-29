@@ -1,5 +1,8 @@
 # Model Forge ![Model Forge icon](model_forge/icon.png)
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![QGIS](https://img.shields.io/badge/QGIS-4.0+-green)](https://www.qgis.org/)
+[![Qt](https://img.shields.io/badge/Qt-6.x-green)](https://www.qt.io/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 Model Forge is a QGIS plugin that helps you turn plain‑language descriptions of GIS workflows into editable Models. It is designed to make it easier to prototype, inspect and refine multi‑step geoprocessing without building every model node by hand. It is designed to arbitralily accept more LLM providers than [IntelliGeo](https://github.com/MahdiFarnaghi/intelli_geo)
