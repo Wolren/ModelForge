@@ -15,6 +15,6 @@ repository=https://github.com/Wolren/ModelForge
 tags=processing,model,AI,MCP,workflow,automation,geoprocessing
 homepage=https://github.com/Wolren/ModelForge
 category=Analysis
-icon=legacy_ui/icon.png
+icon=icon.png
 experimental=True
 deprecated=False

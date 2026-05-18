@@ -1,10 +1,5 @@
 """
-ModelForge Plugin
-=================
-QGIS plugin entrypoint.
+ModelForge Compiler Core
+====================
+Internal module - not a plugin entry point.
 """
-
-
-def classFactory(iface):
-    from .model_forge_plugin import ModelForgePlugin
-    return ModelForgePlugin(iface)

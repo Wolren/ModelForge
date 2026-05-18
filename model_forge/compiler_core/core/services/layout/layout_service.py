@@ -18,8 +18,6 @@ class GraphLayoutService:
 
     def __init__(self, config: Optional[LayoutConfig] = None):
         self.config = config or LayoutConfig.balanced()
-        self._margin_x = 80.0   # left margin
-        self._margin_y = 60.0   # top margin
 
     def layout_plan(self, plan, incremental: bool = False):
         """Assign pos_x / pos_y to all inputs and steps in ExecutablePlan."""
@@ -36,7 +34,7 @@ class GraphLayoutService:
         step_ids = [s.step_id for s in plan.steps]
         ranks = self._assign_ranks(step_ids, dep_map)
 
-        y_cursor = self._margin_y
+        y_cursor = cfg.input_x
         for i, inp in enumerate(plan.inputs):
             inp.pos_x = cfg.input_x
             inp.pos_y = y_cursor
@@ -49,7 +47,7 @@ class GraphLayoutService:
         step_by_id = {s.step_id: s for s in plan.steps}
         for rank, sids in sorted(ranks_by_level.items()):
             x = cfg.start_x + rank * cfg.h_spacing
-            y = self._margin_y
+            y = cfg.input_x
             for sid in sorted(sids):
                 step = step_by_id.get(sid)
                 if step:
@@ -106,8 +104,8 @@ class GraphLayoutService:
         inputs = result.get("inputs", [])
         algorithms = result.get("algorithms", [])
 
-        top_margin = self._margin_y
-        left_margin = self._margin_x
+        top_margin = self.config.input_x
+        left_margin = self.config.input_x
 
         # Inputs: same y, x increments right
         x = left_margin
@@ -140,8 +138,8 @@ class GraphLayoutService:
         inputs = result.get("inputs", [])
         algorithms = result.get("algorithms", [])
 
-        top_margin = self._margin_y
-        left_margin = self._margin_x
+        top_margin = self.config.input_x
+        left_margin = self.config.input_x
 
         # Inputs: stagger right and down
         y = top_margin
@@ -173,12 +171,12 @@ class GraphLayoutService:
         cfg: LayoutConfig,
     ):
         inputs = result.get("inputs", [])
-        top_margin = self._margin_y
+        top_margin = self.config.input_x
 
         # Inputs: fixed x, stagger down
         y = top_margin
         for inp in inputs:
-            inp["pos_x"] = self._margin_x
+            inp["pos_x"] = top_margin
             inp["pos_y"] = y
             y += self._json_node_span(inp, cfg)
 
