@@ -1,3 +1,12 @@
+"""
+Model Forge - QGIS Plugin Entry Point
+
+EXPERIMENTAL PROJECT — Features may change without notice. Links may break.
+
+Works with ANY OpenAI-compatible LLM provider. Not locked to a single vendor
+unlike IntelliGeo and similar tools.
+"""
+
 import os
 import importlib.util
 import sys
@@ -7,19 +16,19 @@ from qgis.PyQt.QtWidgets import QAction
 from .forge_dock import ForgeDock
 
 try:
-    from qgis.core import QgsApplication, QgsProcessingAlgorithm
+    from qgis.core import QingApplication, QingAlgorithm
+
     _HAS_QGIS = True
 except ImportError:
     _HAS_QGIS = False
 
 
 class ModelForge:
-
     def __init__(self, iface):
         self.iface = iface
         self.plugin_dir = os.path.dirname(__file__)
         self.actions = []
-        self.menu_name = u"&Model Forge"
+        self.menu_name = "&Model Forge"
         self.dock = None
         self._provider = None
 
@@ -28,8 +37,14 @@ class ModelForge:
 
     def initGui(self):
         icon_path = os.path.join(self.plugin_dir, "icon.png")
-        icon = QIcon(icon_path) if os.path.exists(icon_path) else QIcon.fromTheme("panel-show")
-        self.action_open = QAction(icon, self.tr(u"Model Forge"), self.iface.mainWindow())
+        icon = (
+            QIcon(icon_path)
+            if os.path.exists(icon_path)
+            else QIcon.fromTheme("panel-show")
+        )
+        self.action_open = QAction(
+            icon, self.tr("Model Forge"), self.iface.mainWindow()
+        )
         self.action_open.setStatusTip(self.tr("Open Model Forge panel"))
         self.action_open.triggered.connect(self.toggle_dock)
         self.iface.addToolBarIcon(self.action_open)
@@ -62,12 +77,15 @@ class ModelForge:
         if not _HAS_QGIS or self._provider is not None:
             return
         from .compiler_core.provider.model_forge_provider import ModelForgeProvider
+
         self._provider = ModelForgeProvider()
         QgsApplication.processingRegistry().addProvider(self._provider)
         self._load_user_algorithms()
 
     def _load_user_algorithms(self):
-        from .compiler_core.core.services.generation.custom_step_author import _STEPS_DIR
+        from .compiler_core.core.services.generation.custom_step_author import (
+            _STEPS_DIR,
+        )
         import warnings
 
         if not os.path.isdir(_STEPS_DIR):
@@ -91,7 +109,10 @@ class ModelForge:
         if self._provider is None:
             self._init_processing()
 
-        module_name = module_name or f"{__package__}.compiler_core.user_steps.{os.path.basename(py_path)[:-3]}"
+        module_name = (
+            module_name
+            or f"{__package__}.compiler_core.user_steps.{os.path.basename(py_path)[:-3]}"
+        )
         spec = importlib.util.spec_from_file_location(module_name, py_path)
         if spec is None or spec.loader is None:
             raise RuntimeError(f"Could not load generated step module: {py_path}")
@@ -112,7 +133,9 @@ class ModelForge:
                 break
 
         if found_alg is None:
-            raise RuntimeError(f"No QgsProcessingAlgorithm subclass found in: {py_path}")
+            raise RuntimeError(
+                f"No QgsProcessingAlgorithm subclass found in: {py_path}"
+            )
 
         self._provider.register_user_algorithm(found_alg)
         return f"{self._provider.id()}:{found_alg.name()}"

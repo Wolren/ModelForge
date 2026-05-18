@@ -3,3 +3,8 @@
 /model_forge_second.zip
 /todo.txt
 /archive/
+.idea/
+__pycache__/
+*.pyc
+.ruff_cache/
+.pytest_cache/

@@ -1,15 +1,28 @@
+"""
+Model Forge - Main Widget
+
+⚠️  EXPERIMENTAL PROJECT
+This plugin is experimental. Features may change, break, or be removed without notice.
+Links and documentation may become outdated or broken.
+Use at your own risk.
+"""
+
 import json
 
 from qgis.PyQt.QtCore import QSettings
 from qgis.PyQt.QtWidgets import QMessageBox
 
-from model_forge.forge_widget_helpers.forge_widget_base import ForgeWidget as LegacyForgeWidget
+from model_forge.forge_widget_helpers.forge_widget_base import (
+    ForgeWidget as LegacyForgeWidget,
+)
 from .compiler_core.ui.model_builder_bridge import ModelBuilderBridge
 from .compiler_core.ui.custom_step_dialog import CustomStepDialog
 from .compiler_core.core.ir import IssueLevel
 from .forge_generate_worker import ForgeGenerateWorker
 from model_forge.forge_widget_helpers.forge_widget_layout import ForgeWidgetLayoutMixin
-from model_forge.forge_widget_helpers.forge_widget_history import ForgeWidgetHistoryMixin
+from model_forge.forge_widget_helpers.forge_widget_history import (
+    ForgeWidgetHistoryMixin,
+)
 
 
 class ForgeWidget(ForgeWidgetLayoutMixin, ForgeWidgetHistoryMixin, LegacyForgeWidget):
@@ -36,15 +49,21 @@ class ForgeWidget(ForgeWidgetLayoutMixin, ForgeWidgetHistoryMixin, LegacyForgeWi
     def _on_generate(self):
         description = self.txt_description.toPlainText().strip()
         if not description:
-            QMessageBox.warning(self, "Model Forge", "Please enter a workflow description.")
+            QMessageBox.warning(
+                self, "Model Forge", "Please enter a workflow description."
+            )
             return
 
         self._apply_settings()
 
         selected_layers = self._get_selected_layers()
-        selected_layer_ids = [layer.id() for layer in selected_layers if layer is not None]
+        selected_layer_ids = [
+            layer.id() for layer in selected_layers if layer is not None
+        ]
         algo_config = self._get_algo_config()
-        self.current_context_text = self.context_collector.collect(selected_layers, algo_config)
+        self.current_context_text = self.context_collector.collect(
+            selected_layers, algo_config
+        )
 
         self.btn_generate.setEnabled(False)
         self.progress_bar.show()
@@ -101,7 +120,8 @@ class ForgeWidget(ForgeWidgetLayoutMixin, ForgeWidgetHistoryMixin, LegacyForgeWi
             raw_text = json.dumps(workflow, indent=2, ensure_ascii=False)
             self.txt_model_json.setPlainText(raw_text)
             self.lbl_validity.setText(
-                "\u26a0 Missing 'inputs' or 'algorithms'. Keys: " + str(list(workflow.keys()))
+                "\u26a0 Missing 'inputs' or 'algorithms'. Keys: "
+                + str(list(workflow.keys()))
             )
             self.lbl_validity.setStyleSheet("color: orange; font-weight: bold;")
             self.tabs.setCurrentIndex(1)
@@ -114,7 +134,9 @@ class ForgeWidget(ForgeWidgetLayoutMixin, ForgeWidgetHistoryMixin, LegacyForgeWi
         self._current_model_json = workflow
         self.lbl_status.setText("Model generated! See Model tab.")
 
-        self.txt_model_json.setPlainText(json.dumps(workflow, indent=2, ensure_ascii=False))
+        self.txt_model_json.setPlainText(
+            json.dumps(workflow, indent=2, ensure_ascii=False)
+        )
         self.lbl_validity.setText("\u2713 Valid JSON structure received.")
         self.lbl_validity.setStyleSheet("color: #4CAF50; font-weight: bold;")
         self.btn_rebuild.setEnabled(True)
@@ -146,9 +168,15 @@ class ForgeWidget(ForgeWidgetLayoutMixin, ForgeWidgetHistoryMixin, LegacyForgeWi
         counts = {"error": 0, "warning": 0, "info": 0}
         lines = []
         for issue in self.current_plan_issues:
-            level = issue.level.value if hasattr(issue.level, "value") else str(issue.level)
+            level = (
+                issue.level.value if hasattr(issue.level, "value") else str(issue.level)
+            )
             counts[level] = counts.get(level, 0) + 1
-            icon = "❌" if issue.level == IssueLevel.ERROR else ("⚠️" if issue.level == IssueLevel.WARNING else "ℹ️")
+            icon = (
+                "❌"
+                if issue.level == IssueLevel.ERROR
+                else ("⚠️" if issue.level == IssueLevel.WARNING else "ℹ️")
+            )
             lines.append(f"{icon} [{issue.code}] {issue.message}")
 
         summary = (
@@ -197,7 +225,9 @@ class ForgeWidget(ForgeWidgetLayoutMixin, ForgeWidgetHistoryMixin, LegacyForgeWi
             QMessageBox.warning(self, "Model Forge", str(e))
             return
 
-        path, _ = QFileDialog.getSaveFileName(self, "Save Model", "", "QGIS Models (*.model3)")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Model", "", "QGIS Models (*.model3)"
+        )
         if not path:
             return
         if not path.endswith(".model3"):
@@ -216,7 +246,9 @@ class ForgeWidget(ForgeWidgetLayoutMixin, ForgeWidgetHistoryMixin, LegacyForgeWi
         except json.JSONDecodeError as e:
             QMessageBox.warning(self, "JSON Error", "Invalid JSON:\n" + str(e))
         except Exception as e:
-            QMessageBox.critical(self, "Model Forge", "Could not open Designer:\n" + str(e))
+            QMessageBox.critical(
+                self, "Model Forge", "Could not open Designer:\n" + str(e)
+            )
 
     def _workflow_from_editor_for_designer(self):
         text = self.txt_model_json.toPlainText().strip()
@@ -231,7 +263,9 @@ class ForgeWidget(ForgeWidgetLayoutMixin, ForgeWidgetHistoryMixin, LegacyForgeWi
         )
         workflow = self._apply_layout(workflow)
         self._current_model_json = workflow
-        self.txt_model_json.setPlainText(json.dumps(workflow, indent=2, ensure_ascii=False))
+        self.txt_model_json.setPlainText(
+            json.dumps(workflow, indent=2, ensure_ascii=False)
+        )
         return workflow
 
     def _open_designer_dialog(self, workflow):
@@ -254,4 +288,6 @@ class ForgeWidget(ForgeWidgetLayoutMixin, ForgeWidgetHistoryMixin, LegacyForgeWi
                     alg_id = self.plugin.register_generated_step(py_path)
                     self.lbl_status.setText(f"Registered custom step: {alg_id}")
         except Exception as e:
-            QMessageBox.critical(self, "Model Forge", f"Could not open Custom Step Author:\n{e}")
+            QMessageBox.critical(
+                self, "Model Forge", f"Could not open Custom Step Author:\n{e}"
+            )

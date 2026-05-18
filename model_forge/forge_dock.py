@@ -1,10 +1,18 @@
+"""
+Model Forge - Dock Widget
+
+⚠️  EXPERIMENTAL PROJECT
+This plugin is experimental. Features may change, break, or be removed without notice.
+Links and documentation may become outdated or broken.
+Use at your own risk.
+"""
+
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import QDockWidget, QWidget, QVBoxLayout
 from .forge_widget import ForgeWidget
 
 
 class ForgeDock(QDockWidget):
-
     def __init__(self, iface, plugin=None, parent=None):
         super().__init__("Model Forge", parent)
         self.iface = iface

@@ -231,8 +231,8 @@ class LLMBackend:
         user_msg = (
             "MODEL JSON:\n" + json.dumps(workflow_json, indent=2)
             + "\n\nVALIDATION ERRORS / USER FEEDBACK:\n"
-            + "\n".join("- " + e for e in errors)
-            + "\n\nALGORITHM CATALOG:\n" + context_text
+            + "\n".join("- " + str(e) for e in errors)
+            + "\n\nALGORITHM CATALOG:\n" + str(context_text)
         )
         result = self._call_llm(SYSTEM_PROMPT_REPAIR, user_msg)
         return self._validate_model_structure(result)
