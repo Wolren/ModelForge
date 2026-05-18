@@ -1,0 +1,50 @@
+name: Package plugin
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package plugin
+        run: |
+          cd model_forge
+          zip -r ../model_forge.zip . \
+            -x "__pycache__/*" \
+            -x "*.pyc" \
+            -x "*.pyo"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: model_forge
+          path: model_forge.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: model_forge
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Model Forge ${{ github.ref_name }}
+          body: |
+            See [metadata.txt](https://github.com/Wolren/ModelForge/blob/master/model_forge/metadata.txt)
+          files: model_forge.zip
+          generate_release_notes: true
