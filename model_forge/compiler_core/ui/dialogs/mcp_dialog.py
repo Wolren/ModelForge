@@ -4,18 +4,34 @@ MCPDialog
 Main Qt6 dialog for the ModelForge MCP assistant.
 Uses native QGIS/Qt widgets throughout - no extra UI framework needed.
 """
+
 from __future__ import annotations
 
 try:
-    from qgis.PyQt.QtWidgets import (
-        QDialog, QVBoxLayout, QHBoxLayout, QGroupBox,
-        QLabel, QLineEdit, QPlainTextEdit, QComboBox,
-        QPushButton, QCheckBox, QProgressBar, QTabWidget,
-        QWidget, QSplitter, QTextBrowser, QMessageBox,
-        QDialogButtonBox, QSpinBox, QDoubleSpinBox,
-    )
     from qgis.PyQt.QtCore import Qt, QThread, pyqtSignal
     from qgis.PyQt.QtGui import QFont
+    from qgis.PyQt.QtWidgets import (
+        QCheckBox,
+        QComboBox,
+        QDialog,
+        QDialogButtonBox,
+        QDoubleSpinBox,
+        QGroupBox,
+        QHBoxLayout,
+        QLabel,
+        QLineEdit,
+        QMessageBox,
+        QPlainTextEdit,
+        QProgressBar,
+        QPushButton,
+        QSpinBox,
+        QSplitter,
+        QTabWidget,
+        QTextBrowser,
+        QVBoxLayout,
+        QWidget,
+    )
+
     _HAS_QGIS = True
 except ImportError:
     _HAS_QGIS = False
@@ -25,36 +41,43 @@ if _HAS_QGIS:
 
     class CompilerWorker(QThread):
         """Runs the compiler pipeline in a background thread."""
-        progress    = pyqtSignal(str)
-        finished    = pyqtSignal(dict, list)   # model_json, issues
-        error       = pyqtSignal(str)
 
-        def __init__(self, description, model_name, model_group, llm_config, layout_mode, parent=None):
+        progress = pyqtSignal(str)
+        finished = pyqtSignal(dict, list)  # model_json, issues
+        error = pyqtSignal(str)
+
+        def __init__(
+            self, description, model_name, model_group, llm_config, layout_mode, parent=None
+        ):
             super().__init__(parent)
-            self.description  = description
-            self.model_name   = model_name
-            self.model_group  = model_group
-            self.llm_config   = llm_config
-            self.layout_mode  = layout_mode
+            self.description = description
+            self.model_name = model_name
+            self.model_group = model_group
+            self.llm_config = llm_config
+            self.layout_mode = layout_mode
+            self._cancelled = False
 
         def run(self):
+            if self._cancelled:
+                return
             try:
-                from ...llm.factory import create_backend
-                from ...context_collector import ContextCollector
-                from ...mcp.tool_registry import build_server
-                from ...mcp.client import DirectMCPClient
-                from ...compiler.pipeline import CompilerPipeline
-                from ...compiler.intent_parser import IntentParser
-                from ...compiler.semantic_planner import SemanticPlanner
-                from ...compiler.algorithm_resolver import AlgorithmResolver
-                from ...compiler.expression_validator import ExpressionValidator
-                from ...compiler.ir_validator import IRValidator
-                from ...compiler.model_emitter import ModelEmitter
-                from ...services.layout.graph_layout import GraphLayoutService
+                from ...core.compiler.algorithm_resolver import AlgorithmResolver
+                from ...core.compiler.expression_validator import ExpressionValidator
+                from ...core.compiler.intent_parser import IntentParser
+                from ...core.compiler.ir_validator import IRValidator
+                from ...core.compiler.model_emitter import ModelEmitter
+                from ...core.compiler.pipeline import CompilerPipeline
+                from ...core.compiler.link_repair import LinkRepairService
+                from ...core.compiler.semantic_planner import SemanticPlanner
+                from ...core.context_collector import ContextCollector
+                from ...core.llm.factory import create_backend
+                from ...core.mcp.client import DirectMCPClient
+                from ...core.mcp.tool_registry import build_server
+                from ...core.services.layout.graph_layout import GraphLayoutService
 
                 self.progress.emit("Connecting to LLM backend...")
-                llm    = create_backend(self.llm_config)
-                ctx    = ContextCollector().collect()
+                llm = create_backend(self.llm_config)
+                ctx = ContextCollector().collect()
                 server = build_server(llm)
                 client = DirectMCPClient(server)
 
@@ -65,8 +88,11 @@ if _HAS_QGIS:
                     expression_validator=ExpressionValidator(),
                     ir_validator=IRValidator(),
                     model_emitter=ModelEmitter(),
+                    link_repair=LinkRepairService(),
                 )
 
+                if self._cancelled:
+                    return
                 plan, model_json = pipeline.run(
                     raw_text=self.description,
                     model_name=self.model_name,
@@ -75,14 +101,16 @@ if _HAS_QGIS:
                     mcp_client=client,
                     progress_callback=lambda msg: self.progress.emit(msg),
                 )
-
+                if self._cancelled:
+                    return
                 layout_svc = GraphLayoutService()
                 model_json = layout_svc.layout_model_json(model_json, mode=self.layout_mode)
 
                 self.finished.emit(model_json, plan.issues)
 
             except Exception as e:
-                from ...llm.base import LLMTimeoutError, LLMBackendError
+                from ...core.llm.base import LLMBackendError, LLMTimeoutError
+
                 if isinstance(e, LLMTimeoutError):
                     self.error.emit(
                         "The LLM request timed out. Try a smaller context or increase backend timeout."
@@ -92,13 +120,12 @@ if _HAS_QGIS:
                 else:
                     self.error.emit(str(e) or "Compiler execution failed.")
 
-
     class MCPDialog(QDialog):
         """Main dialog for the ModelForge MCP workflow builder."""
 
         def __init__(self, iface, parent=None):
             super().__init__(parent)
-            self.iface   = iface
+            self.iface = iface
             self._worker = None
             self._result = None
             self._setup_ui()
@@ -133,7 +160,7 @@ if _HAS_QGIS:
 
             # ── Progress bar ──────────────────────────────────────────────
             self._progress = QProgressBar()
-            self._progress.setRange(0, 0)   # indeterminate
+            self._progress.setRange(0, 0)  # indeterminate
             self._progress.setVisible(False)
             root.addWidget(self._progress)
 
@@ -142,7 +169,7 @@ if _HAS_QGIS:
 
             # ── Buttons ───────────────────────────────────────────────────
             btn_row = QHBoxLayout()
-            self._build_btn  = QPushButton("Build →")
+            self._build_btn = QPushButton("Build →")
             self._build_btn.setDefault(True)
             self._cancel_btn = QPushButton("Cancel")
             self._cancel_btn.setEnabled(False)
@@ -260,10 +287,10 @@ if _HAS_QGIS:
             provider_map = {0: "ollama", 1: "openai"}
             idx = self._provider_combo.currentIndex()
             return {
-                "provider":    provider_map.get(idx, "ollama"),
-                "model":       self._llm_model_edit.text().strip(),
-                "base_url":    self._base_url_edit.text().strip(),
-                "api_key":     self._api_key_edit.text().strip(),
+                "provider": provider_map.get(idx, "ollama"),
+                "model": self._llm_model_edit.text().strip(),
+                "base_url": self._base_url_edit.text().strip(),
+                "api_key": self._api_key_edit.text().strip(),
                 "temperature": 0.1,
             }
 
@@ -296,7 +323,7 @@ if _HAS_QGIS:
 
         def _on_cancel(self):
             if self._worker and self._worker.isRunning():
-                self._worker.terminate()
+                self._worker._cancelled = True
                 self._worker.wait()
             self._reset_ui("Cancelled.")
 
@@ -309,11 +336,15 @@ if _HAS_QGIS:
             self._import_btn.setEnabled(True)
 
             # Display issues
-            from ..core.ir import IssueLevel
+            from ...core.ir import IssueLevel
+
             issue_lines = []
             for issue in issues:
-                icon = "❌" if issue.level == IssueLevel.ERROR else (
-                       "⚠️" if issue.level == IssueLevel.WARNING else "ℹ️")
+                icon = (
+                    "❌"
+                    if issue.level == IssueLevel.ERROR
+                    else ("⚠️" if issue.level == IssueLevel.WARNING else "ℹ️")
+                )
                 issue_lines.append(f"{icon} [{issue.code}] {issue.message}")
             self._issues_browser.setPlainText("\n".join(issue_lines) or "No issues.")
 
@@ -334,7 +365,8 @@ if _HAS_QGIS:
             if not self._result:
                 return
             try:
-                from .model_builder_bridge import ModelBuilderBridge
+                from ..model_builder_bridge import ModelBuilderBridge
+
                 bridge = ModelBuilderBridge(self.iface)
                 bridge.load_model_json(self._result)
                 self.accept()
@@ -342,5 +374,6 @@ if _HAS_QGIS:
                 QMessageBox.critical(self, "Import error", str(e))
 
 else:
+
     class MCPDialog:
         pass

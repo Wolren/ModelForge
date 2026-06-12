@@ -1,114 +1,157 @@
 """
 Intermediate Representation (IR) for the ModelForge compiler pipeline.
 All compiler stages operate on these dataclasses.
+
+Single source of truth — do not duplicate in this package.
 """
+
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
-class ParamKind(Enum):
-    VECTOR_LAYER  = "vectorlayer"
-    RASTER_LAYER  = "rasterlayer"
-    FIELD         = "field"
-    EXPRESSION    = "expression"
-    NUMBER        = "number"
-    BOOLEAN       = "boolean"
-    STRING        = "string"
-    ENUM          = "enum"
-    CRS           = "crs"
-    EXTENT        = "extent"
-    SINK          = "sink"
-    FEATURE_SINK  = "featuresink"
-    RASTER_DEST   = "rasterdestination"
-    UNKNOWN       = "unknown"
+class ParamKind(str, Enum):
+    VECTOR_LAYER = "vectorlayer"
+    RASTER_LAYER = "rasterlayer"
+    FIELD = "field"
+    EXPRESSION = "expression"
+    NUMBER = "number"
+    BOOLEAN = "boolean"
+    STRING = "string"
+    ENUM = "enum"
+    CRS = "crs"
+    EXTENT = "extent"
+    FILE = "file"
+    FOLDER = "folder"
+    SINK = "sink"
+    FEATURE_SINK = "featuresink"
+    RASTER_DEST = "rasterdestination"
+    UNKNOWN = "unknown"
 
 
-class StepStatus(Enum):
-    ASSUMED   = "assumed"
-    RESOLVED  = "resolved"
-    BLOCKED   = "blocked"
-    CUSTOM    = "custom"
+class OutputKind(str, Enum):
+    VECTOR = "vector"
+    RASTER = "raster"
+    FILE = "file"
+    NUMBER = "number"
+    STRING = "string"
+    BOOLEAN = "boolean"
+    LAYER = "layer"
+    UNKNOWN = "unknown"
 
 
-class IssueLevel(Enum):
-    INFO    = "info"
+class StepStatus(str, Enum):
+    ASSUMED = "assumed"
+    RESOLVED = "resolved"
+    BLOCKED = "blocked"
+    CUSTOM = "custom"
+
+
+class IssueLevel(str, Enum):
+    INFO = "info"
     WARNING = "warning"
-    ERROR   = "error"
+    ERROR = "error"
+
+
+@dataclass
+class ParameterSpec:
+    name: str
+    kind: ParamKind
+    description: str = ""
+    optional: bool = False
+    enum_options: list[str] = field(default_factory=list)
+    default_value: Any = None
+
+
+@dataclass
+class OutputSpec:
+    name: str
+    kind: OutputKind
+    description: str = ""
 
 
 @dataclass
 class ModelInput:
-    name:          str
-    kind:          ParamKind
-    label:         str   = ""
-    description:   str   = ""
-    optional:      bool  = False
-    default_value: Any   = None
-    pos_x:         float = 20.0
-    pos_y:         float = 20.0
+    name: str
+    kind: ParamKind
+    label: str = ""
+    description: str = ""
+    optional: bool = False
+    default_value: Any = None
+    pos_x: float = 20.0
+    pos_y: float = 20.0
 
 
 @dataclass
 class ResolvedAlgorithm:
-    algorithm_id:  str
-    display_name:  str = ""
-    provider_id:   str = ""
+    algorithm_id: str
+    display_name: str = ""
+    provider_id: str = ""
+    parameters: list[ParameterSpec] = field(default_factory=list)
+    outputs: list[OutputSpec] = field(default_factory=list)
+    doc_url: str | None = None
 
 
 @dataclass
 class ExpressionNode:
-    node_type:     str            # comparison|logical|function|literal|field_ref
-    rendered:      Optional[str] = None
-    value:         Any           = None
-    field_name:    Optional[str] = None
-    function_name: Optional[str] = None
-    arguments:     List          = field(default_factory=list)
-    operator:      Optional[str] = None
-    left:          Optional["ExpressionNode"] = None
-    right:         Optional["ExpressionNode"] = None
+    node_type: str  # comparison|logical|function|literal|field_ref
+    rendered: str | None = None
+    value: Any = None
+    field_name: str | None = None
+    function_name: str | None = None
+    arguments: list = field(default_factory=list)
+    operator: str | None = None
+    left: ExpressionNode | None = None
+    right: ExpressionNode | None = None
 
 
 @dataclass
 class ParameterBinding:
-    source_type:   str                       # model_input|child_output|static|expression|enum_index
-    model_input:   Optional[str]  = None
-    child_id:      Optional[str]  = None
-    output_name:   Optional[str]  = None
-    static_value:  Any            = None
-    enum_index:    Optional[int]  = None
-    expression:    Optional[ExpressionNode] = None
+    source_type: str  # model_input|child_output|static|expression|enum_index
+    model_input: str | None = None
+    child_id: str | None = None
+    output_name: str | None = None
+    static_value: Any = None
+    enum_index: int | None = None
+    expression: ExpressionNode | None = None
 
 
 @dataclass
 class ExecutableStep:
-    step_id:    str
-    label:      str
-    status:     StepStatus        = StepStatus.ASSUMED
-    confidence: float             = 0.0
-    algorithm:  Optional[ResolvedAlgorithm] = None
-    parameters: Dict[str, ParameterBinding] = field(default_factory=dict)
-    pos_x:      float             = 0.0
-    pos_y:      float             = 0.0
-    rank:       int               = 0
+    step_id: str
+    label: str
+    status: StepStatus = StepStatus.ASSUMED
+    confidence: float = 0.0
+    algorithm: ResolvedAlgorithm | None = None
+    parameters: dict[str, ParameterBinding] = field(default_factory=dict)
+    output_names: list[str] = field(default_factory=list)
+    pos_x: float = 0.0
+    pos_y: float = 0.0
+    rank: int = 0
+    # Free-form hints from the planner: ``planner_algorithm_id``,
+    # ``constraints`` (the raw constraints dict from plan_workflow),
+    # ``needs_review``. The resolver uses these to short-circuit
+    # re-derivation of algorithm IDs and parameter values.
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class PlanIssue:
-    level:      IssueLevel
-    code:       str
-    message:    str
-    step_id:    Optional[str] = None
-    param_name: Optional[str] = None
+    level: IssueLevel
+    code: str
+    message: str
+    step_id: str | None = None
+    param_name: str | None = None
 
 
 @dataclass
 class ExecutablePlan:
-    inputs:   List[ModelInput]   = field(default_factory=list)
-    steps:    List[ExecutableStep] = field(default_factory=list)
-    issues:   List[PlanIssue]    = field(default_factory=list)
-    metadata: Dict[str, Any]     = field(default_factory=dict)
+    inputs: list[ModelInput] = field(default_factory=list)
+    steps: list[ExecutableStep] = field(default_factory=list)
+    issues: list[PlanIssue] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_valid(self) -> bool:
@@ -117,3 +160,12 @@ class ExecutablePlan:
     @property
     def has_warnings(self) -> bool:
         return any(i.level == IssueLevel.WARNING for i in self.issues)
+
+    def assumed_steps(self) -> list[ExecutableStep]:
+        return [s for s in self.steps if s.status == StepStatus.ASSUMED]
+
+    def blocked_steps(self) -> list[ExecutableStep]:
+        return [s for s in self.steps if s.status == StepStatus.BLOCKED]
+
+    def step_by_id(self, step_id: str) -> ExecutableStep | None:
+        return next((s for s in self.steps if s.step_id == step_id), None)

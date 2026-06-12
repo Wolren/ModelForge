@@ -4,31 +4,47 @@ CustomStepDialog
 Native Qt6 dialog for authoring, editing, and generating custom
 QgsProcessingAlgorithm steps.
 """
+
 from __future__ import annotations
 
 try:
-    from qgis.PyQt.QtWidgets import (
-        QDialog, QVBoxLayout, QHBoxLayout, QGroupBox,
-        QLabel, QLineEdit, QPlainTextEdit, QComboBox,
-        QPushButton, QListWidget, QListWidgetItem,
-        QMessageBox, QSplitter, QWidget, QCheckBox, QInputDialog,
-    )
     from qgis.PyQt.QtCore import Qt
     from qgis.PyQt.QtGui import QFont
+    from qgis.PyQt.QtWidgets import (
+        QCheckBox,
+        QComboBox,
+        QDialog,
+        QGroupBox,
+        QHBoxLayout,
+        QInputDialog,
+        QLabel,
+        QLineEdit,
+        QListWidget,
+        QListWidgetItem,
+        QMessageBox,
+        QPlainTextEdit,
+        QPushButton,
+        QSplitter,
+        QVBoxLayout,
+        QWidget,
+    )
+
     _HAS_QGIS = True
 except ImportError:
     _HAS_QGIS = False
 
 if _HAS_QGIS:
     from ...core.services.generation.custom_step_author import (
-        CustomStepAuthorService, CustomStepSpec, ParamDef, OutputDef,
+        CustomStepAuthorService,
+        CustomStepSpec,
+        OutputDef,
+        ParamDef,
     )
 
     class CustomStepDialog(QDialog):
-
         def __init__(self, spec: CustomStepSpec | None = None, parent=None):
             super().__init__(parent)
-            self._svc  = CustomStepAuthorService()
+            self._svc = CustomStepAuthorService()
             self._spec = spec
             self._params: list[ParamDef] = []
             self._outputs: list[OutputDef] = []
@@ -50,10 +66,10 @@ if _HAS_QGIS:
 
             # ── Left: schema ────────────────────────────────────────────
             left = QWidget()
-            lv   = QVBoxLayout(left)
+            lv = QVBoxLayout(left)
 
             meta = QGroupBox("Algorithm metadata")
-            mg   = QVBoxLayout(meta)
+            mg = QVBoxLayout(meta)
             r1 = QHBoxLayout()
             r1.addWidget(QLabel("Step ID:"))
             self._id_edit = QLineEdit()
@@ -108,8 +124,8 @@ if _HAS_QGIS:
             splitter.addWidget(left)
 
             # ── Right: code editor ───────────────────────────────────────
-            right  = QWidget()
-            rv     = QVBoxLayout(right)
+            right = QWidget()
+            rv = QVBoxLayout(right)
             rv.addWidget(QLabel("Code body (processAlgorithm inner logic):"))
             self._code_edit = QPlainTextEdit()
             mono = QFont("Monospace")
@@ -138,7 +154,7 @@ if _HAS_QGIS:
             # ── Bottom buttons ───────────────────────────────────────────
             btn_row = QHBoxLayout()
             self._validate_btn = QPushButton("Validate code")
-            self._save_btn     = QPushButton("Save & Generate")
+            self._save_btn = QPushButton("Save & Generate")
             self._save_btn.setDefault(True)
             cancel_btn = QPushButton("Cancel")
             btn_row.addWidget(self._validate_btn)
@@ -171,6 +187,7 @@ if _HAS_QGIS:
 
         def _add_param(self):
             from .param_editor_dialog import ParamEditorDialog
+
             dlg = ParamEditorDialog(parent=self)
             if dlg.exec() == QDialog.DialogCode.Accepted:
                 p = dlg.get_param_def()
@@ -208,7 +225,7 @@ if _HAS_QGIS:
                 del self._outputs[row]
 
         def _validate_code(self):
-            code   = self._code_edit.toPlainText()
+            code = self._code_edit.toPlainText()
             errors = self._svc.validate_code_body(code)
             if errors:
                 self._issues_label.setText("Issues:\n" + "\n".join(errors))
@@ -218,12 +235,12 @@ if _HAS_QGIS:
 
         def _save_and_generate(self):
             step_id = self._id_edit.text().strip()
-            name    = self._name_edit.text().strip()
+            name = self._name_edit.text().strip()
             if not step_id or not name:
                 QMessageBox.warning(self, "Required", "Step ID and display name are required.")
                 return
 
-            code   = self._code_edit.toPlainText()
+            code = self._code_edit.toPlainText()
             errors = self._svc.validate_code_body(code)
             if errors:
                 self._issues_label.setText("Cannot save — fix issues first:\n" + "\n".join(errors))
@@ -242,12 +259,14 @@ if _HAS_QGIS:
             self.generated_py_path = py_path
             self.generated_step_id = step_id
             QMessageBox.information(
-                self, "Saved",
+                self,
+                "Saved",
                 f"Custom step saved and generated:\n{py_path}\n\n"
-                f"It can now be registered in the active ModelForge provider."
+                f"It can now be registered in the active ModelForge provider.",
             )
             self.accept()
 
 else:
+
     class CustomStepDialog:
         pass

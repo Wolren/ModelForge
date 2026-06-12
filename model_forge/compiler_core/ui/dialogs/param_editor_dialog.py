@@ -3,14 +3,22 @@ ParamEditorDialog
 =================
 Mini dialog to define a single parameter for a custom step.
 """
+
 from __future__ import annotations
 
 try:
     from qgis.PyQt.QtWidgets import (
-        QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-        QLineEdit, QComboBox, QCheckBox, QPushButton,
+        QCheckBox,
+        QComboBox,
+        QDialog,
         QDialogButtonBox,
+        QHBoxLayout,
+        QLabel,
+        QLineEdit,
+        QPushButton,
+        QVBoxLayout,
     )
+
     _HAS_QGIS = True
 except ImportError:
     _HAS_QGIS = False
@@ -19,13 +27,20 @@ if _HAS_QGIS:
     from ...core.services.generation.custom_step_author import ParamDef
 
     _PARAM_KINDS = [
-        "vectorlayer", "rasterlayer", "number", "string",
-        "boolean", "field", "expression", "crs", "extent",
-        "sink", "featuresink",
+        "vectorlayer",
+        "rasterlayer",
+        "number",
+        "string",
+        "boolean",
+        "field",
+        "expression",
+        "crs",
+        "extent",
+        "sink",
+        "featuresink",
     ]
 
     class ParamEditorDialog(QDialog):
-
         def __init__(self, param: ParamDef | None = None, parent=None):
             super().__init__(parent)
             self.setWindowTitle("Parameter Definition")
@@ -82,5 +97,6 @@ if _HAS_QGIS:
             )
 
 else:
+
     class ParamEditorDialog:
         pass

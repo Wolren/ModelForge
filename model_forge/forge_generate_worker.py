@@ -1,13 +1,7 @@
-import json
-from datetime import datetime
+from threading import Event
 
 from qgis.PyQt.QtCore import QThread, pyqtSignal
 
-from .compiler_core.core.context_collector import ContextCollector as CompilerContextCollector
-from .compiler_core.core.llm.factory import create_backend as create_compiler_backend
-from .compiler_core.core.llm.base import LLMBackendError, LLMTimeoutError
-from .compiler_core.core.mcp.client import DirectMCPClient
-from .compiler_core.core.mcp.tool_registry import build_server
 from .compiler_core.core.compiler.algorithm_resolver import AlgorithmResolver
 from .compiler_core.core.compiler.expression_validator import ExpressionValidator
 from .compiler_core.core.compiler.intent_parser import IntentParser
@@ -15,7 +9,14 @@ from .compiler_core.core.compiler.ir_validator import IRValidator
 from .compiler_core.core.compiler.model_emitter import ModelEmitter
 from .compiler_core.core.compiler.pipeline import CompilerPipeline
 from .compiler_core.core.compiler.semantic_planner import SemanticPlanner
+from .compiler_core.core.context_collector import (
+    ContextCollector as CompilerContextCollector,
+)
 from .compiler_core.core.ir import IssueLevel
+from .compiler_core.core.llm.base import LLMBackendError, LLMTimeoutError
+from .compiler_core.core.llm.factory import create_backend as create_compiler_backend
+from .compiler_core.core.mcp.client import DirectMCPClient
+from .compiler_core.core.mcp.tool_registry import build_server
 from .compiler_core.core.services.layout.graph_layout import GraphLayoutService
 
 
@@ -49,36 +50,44 @@ class ForgeGenerateWorker(QThread):
         self.selected_layer_ids = set(selected_layer_ids or [])
         self.algo_config = algo_config or {}
         self.optimize_generation = bool(optimize_generation)
-        self._is_cancelled = False
+        self._cancelled = Event()
 
     def request_cancel(self):
-        self._is_cancelled = True
+        self._cancelled.set()
 
     def run(self):
         try:
             self.progress.emit("Connecting to LLM backend...")
-            if self._is_cancelled:
+            if self._cancelled.is_set():
                 self.cancelled.emit()
                 return
 
             llm = create_compiler_backend(self.llm_config)
 
             self.progress.emit("Collecting QGIS context...")
-            if self._is_cancelled:
+            if self._cancelled.is_set():
                 self.cancelled.emit()
                 return
 
             max_algorithms = int(self.algo_config.get("max_algorithms", 60))
-            ctx = CompilerContextCollector().collect(max_algorithms=max_algorithms)
+            provider_ids = self.algo_config.get("provider_ids") or None
+            algorithm_groups = self.algo_config.get("algorithm_groups") or None
+            ctx = CompilerContextCollector().collect(
+                max_algorithms=max_algorithms,
+                provider_ids=provider_ids,
+                algorithm_groups=algorithm_groups,
+            )
             ctx["layers"] = self._filter_layers(ctx.get("layers", []))
             ctx["algorithms"] = self._filter_algorithms(ctx.get("algorithms", {}))
 
-            if self._is_cancelled:
+            if self._cancelled.is_set():
                 self.cancelled.emit()
                 return
 
             server = build_server(llm)
             client = DirectMCPClient(server)
+            from .compiler_core.core.compiler.link_repair import LinkRepairService
+
             pipeline = CompilerPipeline(
                 intent_parser=IntentParser(),
                 semantic_planner=SemanticPlanner(),
@@ -86,9 +95,10 @@ class ForgeGenerateWorker(QThread):
                 expression_validator=ExpressionValidator(),
                 ir_validator=IRValidator(),
                 model_emitter=ModelEmitter(),
+                link_repair=LinkRepairService(),
             )
 
-            if self._is_cancelled:
+            if self._cancelled.is_set():
                 self.cancelled.emit()
                 return
 
@@ -98,7 +108,7 @@ class ForgeGenerateWorker(QThread):
                 full_context=ctx,
             )
 
-            if self._is_cancelled:
+            if self._cancelled.is_set():
                 self.cancelled.emit()
                 return
 
@@ -110,7 +120,7 @@ class ForgeGenerateWorker(QThread):
             )
             self.finished.emit(model_json, plan.issues)
         except Exception as e:
-            if self._is_cancelled:
+            if self._cancelled.is_set():
                 self.cancelled.emit()
                 return
             self.error.emit(self._friendly_error_text(e))
@@ -124,13 +134,21 @@ class ForgeGenerateWorker(QThread):
         if self.algo_config.get("include_all"):
             return algorithms
 
+        provider_ids = self.algo_config.get("provider_ids")
+        if provider_ids:
+            return {
+                alg_id: alg
+                for alg_id, alg in algorithms.items()
+                if alg_id.split(":", 1)[0] in provider_ids
+            }
+
         enabled = set()
         if self.algo_config.get("include_native"):
             enabled.add("native")
         if self.algo_config.get("include_gdal"):
             enabled.add("gdal")
         if self.algo_config.get("include_grass"):
-            enabled.add("grass")
+            enabled.add("grass7")
         if self.algo_config.get("include_saga"):
             enabled.add("saga")
 
@@ -138,9 +156,7 @@ class ForgeGenerateWorker(QThread):
             return {}
 
         return {
-            alg_id: alg
-            for alg_id, alg in algorithms.items()
-            if alg_id.split(":", 1)[0] in enabled
+            alg_id: alg for alg_id, alg in algorithms.items() if alg_id.split(":", 1)[0] in enabled
         }
 
     def _run_optimized_pipeline(self, pipeline, client, full_context):
@@ -149,7 +165,7 @@ class ForgeGenerateWorker(QThread):
         base_text = " ".join((self.description or "").split())
 
         for attempt in range(max_attempts):
-            if self._is_cancelled:
+            if self._cancelled.is_set():
                 self.cancelled.emit()
                 return None, {}
 
@@ -158,9 +174,11 @@ class ForgeGenerateWorker(QThread):
             attempt_text = self._build_attempt_prompt(base_text, last_error, attempt)
 
             if attempt > 0:
-                self.progress.emit(f"Optimizing prompt and retrying ({retry_index}/{max_attempts})...")
+                self.progress.emit(
+                    f"Optimizing prompt and retrying ({retry_index}/{max_attempts})..."
+                )
 
-            if self._is_cancelled:
+            if self._cancelled.is_set():
                 self.cancelled.emit()
                 return None, {}
 
@@ -174,7 +192,7 @@ class ForgeGenerateWorker(QThread):
                     progress_callback=lambda msg: self.progress.emit(msg),
                 )
             except Exception as e:
-                if self._is_cancelled:
+                if self._cancelled.is_set():
                     self.cancelled.emit()
                     return None, {}
                 last_error = e
@@ -182,15 +200,13 @@ class ForgeGenerateWorker(QThread):
                     continue
                 raise
 
-            if self._is_cancelled:
+            if self._cancelled.is_set():
                 self.cancelled.emit()
                 return None, {}
 
             error_issues = [i for i in plan.issues if i.level == IssueLevel.ERROR]
             if error_issues and retry_index < max_attempts and self.optimize_generation:
-                last_error = RuntimeError(
-                    "; ".join(issue.message for issue in error_issues[:2])
-                )
+                last_error = RuntimeError("; ".join(issue.message for issue in error_issues[:2]))
                 continue
 
             return plan, model_json

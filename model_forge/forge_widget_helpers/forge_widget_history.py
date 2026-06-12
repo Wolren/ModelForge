@@ -1,9 +1,18 @@
 import json
 from datetime import datetime
 
-from qgis.PyQt.QtWidgets import QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QMessageBox, QInputDialog
-from qgis.PyQt.QtWidgets import QListWidget, QListWidgetItem, QWidget
-from qgis.PyQt.QtCore import Qt, QSize, QSettings
+from qgis.PyQt.QtCore import QSettings, QSize, Qt
+from qgis.PyQt.QtWidgets import (
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 class ForgeWidgetHistoryMixin:
@@ -56,7 +65,9 @@ class ForgeWidgetHistoryMixin:
 
     def _save_history_settings(self):
         s = QSettings()
-        s.setValue("ModelForge/generation_history", json.dumps(self._history_entries, ensure_ascii=False))
+        s.setValue(
+            "ModelForge/generation_history", json.dumps(self._history_entries, ensure_ascii=False)
+        )
 
     def _record_history_entry(self, workflow):
         entry = {
@@ -115,9 +126,15 @@ class ForgeWidgetHistoryMixin:
             QMessageBox.warning(self, "History", "Selected history entry is invalid.")
             return
 
-        self._set_combo_value(self.cmb_layout_profile_generate, entry.get("layout_profile", "balanced"))
-        self._set_combo_value(self.cmb_layout_orientation_generate, entry.get("layout_orientation", "horizontal"))
-        self._set_combo_value(self.cmb_layout_algorithm_generate, entry.get("layout_algorithm", "sugiyama"))
+        self._set_combo_value(
+            self.cmb_layout_profile_generate, entry.get("layout_profile", "balanced")
+        )
+        self._set_combo_value(
+            self.cmb_layout_orientation_generate, entry.get("layout_orientation", "horizontal")
+        )
+        self._set_combo_value(
+            self.cmb_layout_algorithm_generate, entry.get("layout_algorithm", "sugiyama")
+        )
         self._on_layout_control_changed()
 
         self._current_model_json = workflow
@@ -147,7 +164,9 @@ class ForgeWidgetHistoryMixin:
             return
         current = self._history_entries[idx]
         old_title = current.get("title") or current.get("model_name", "workflow")
-        new_title, ok = QInputDialog.getText(self, "Rename History Item", "New name:", text=old_title)
+        new_title, ok = QInputDialog.getText(
+            self, "Rename History Item", "New name:", text=old_title
+        )
         if not ok:
             return
         new_title = (new_title or "").strip()

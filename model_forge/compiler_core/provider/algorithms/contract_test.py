@@ -4,17 +4,19 @@ ContractTestAlgorithm
 Runs FixtureGeneratorService against a plan and reports test results
 via the Processing feedback channel.
 """
+
 from __future__ import annotations
 
 try:
     from qgis.core import (
         QgsProcessingAlgorithm,
-        QgsProcessingParameterString,
-        QgsProcessingParameterEnum,
-        QgsProcessingOutputString,
         QgsProcessingException,
+        QgsProcessingOutputString,
+        QgsProcessingParameterEnum,
+        QgsProcessingParameterString,
     )
     from qgis.PyQt.QtCore import QCoreApplication
+
     _HAS_QGIS = True
 except ImportError:
     _HAS_QGIS = False
@@ -23,35 +25,50 @@ if _HAS_QGIS:
     import json
 
     class ContractTestAlgorithm(QgsProcessingAlgorithm):
-
         def tr(self, message: str) -> str:
             return QCoreApplication.translate("ContractTestAlgorithm", message)
 
-        INPUT_JSON  = "INPUT_JSON"
-        MODES       = "MODES"
+        INPUT_JSON = "INPUT_JSON"
+        MODES = "MODES"
         OUTPUT_REPORT = "OUTPUT_REPORT"
 
-        def name(self)        -> str: return "mcp_contract_test"
-        def displayName(self) -> str: return self.tr("Run Contract Tests (MCP)")
-        def group(self)       -> str: return self.tr("ModelForge")
-        def groupId(self)     -> str: return "model_forge"
+        def name(self) -> str:
+            return "mcp_contract_test"
 
-        def createInstance(self): return ContractTestAlgorithm()
+        def displayName(self) -> str:
+            return self.tr("Run Contract Tests (MCP)")
+
+        def group(self) -> str:
+            return self.tr("ModelForge")
+
+        def groupId(self) -> str:
+            return "model_forge"
+
+        def createInstance(self):
+            return ContractTestAlgorithm()
 
         def initAlgorithm(self, config=None):
-            self.addParameter(QgsProcessingParameterString(
-                self.INPUT_JSON, self.tr("Compiled model JSON"), multiLine=True))
-            self.addParameter(QgsProcessingParameterEnum(
-                self.MODES, self.tr("Test modes to run"),
-                options=["happy only", "adversarial only", "all"],
-                defaultValue=2, allowMultiple=False,
-            ))
-            self.addOutput(QgsProcessingOutputString(
-                self.OUTPUT_REPORT, self.tr("Test report JSON")))
+            self.addParameter(
+                QgsProcessingParameterString(
+                    self.INPUT_JSON, self.tr("Compiled model JSON"), multiLine=True
+                )
+            )
+            self.addParameter(
+                QgsProcessingParameterEnum(
+                    self.MODES,
+                    self.tr("Test modes to run"),
+                    options=["happy only", "adversarial only", "all"],
+                    defaultValue=2,
+                    allowMultiple=False,
+                )
+            )
+            self.addOutput(
+                QgsProcessingOutputString(self.OUTPUT_REPORT, self.tr("Test report JSON"))
+            )
 
         def processAlgorithm(self, parameters, context, feedback):
-            raw_json  = self.parameterAsString(parameters, self.INPUT_JSON, context)
-            modes_idx = self.parameterAsEnum  (parameters, self.MODES,      context)
+            raw_json = self.parameterAsString(parameters, self.INPUT_JSON, context)
+            modes_idx = self.parameterAsEnum(parameters, self.MODES, context)
             modes_map = {
                 0: ("happy",),
                 1: ("adversarial",),
@@ -64,10 +81,8 @@ if _HAS_QGIS:
             except json.JSONDecodeError as e:
                 raise QgsProcessingException(f"Invalid JSON: {e}") from e
 
+            from ...core.ir import ExecutableStep, ParameterBinding, ResolvedAlgorithm, StepStatus
             from ...core.services.testing.fixture_generator import FixtureGeneratorService
-            from ...core.ir import (
-                ExecutableStep, StepStatus, ResolvedAlgorithm, ParameterBinding
-            )
 
             svc = FixtureGeneratorService()
             report = {"steps": [], "summary": {"total": 0, "passed": 0, "failed": 0}}
@@ -133,24 +148,26 @@ if _HAS_QGIS:
                                 f"FAIL [{step.step_id}] {r.fixture.name}: {r.error_msg}",
                                 fatalError=False,
                             )
-                    step_report["tests"].append({
-                        "name":      r.fixture.name,
-                        "mode":      r.fixture.mode,
-                        "status":    status_label,
-                        "violation": r.fixture.violation,
-                        "error_msg": r.error_msg,
-                    })
+                    step_report["tests"].append(
+                        {
+                            "name": r.fixture.name,
+                            "mode": r.fixture.mode,
+                            "status": status_label,
+                            "violation": r.fixture.violation,
+                            "error_msg": r.error_msg,
+                        }
+                    )
 
                 report["steps"].append(step_report)
                 feedback.pushInfo(f"Step {step.step_id}: {len(results)} tests run.")
 
             s = report["summary"]
             feedback.pushInfo(
-                f"Contract tests complete: {s['passed']}/{s['total']} passed, "
-                f"{s['failed']} failed."
+                f"Contract tests complete: {s['passed']}/{s['total']} passed, {s['failed']} failed."
             )
             return {self.OUTPUT_REPORT: json.dumps(report, indent=2)}
 
 else:
+
     class ContractTestAlgorithm:
         pass

@@ -7,16 +7,24 @@ Works with ANY OpenAI-compatible LLM provider. Not locked to a single vendor
 unlike IntelliGeo and similar tools.
 """
 
-import os
 import importlib.util
+import logging
+import os
 import sys
+
 from qgis.PyQt.QtCore import QCoreApplication, Qt
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
+
+from .compiler_core.log import configure_logger
 from .forge_dock import ForgeDock
 
+configure_logger()
+
+log = logging.getLogger(__name__)
+
 try:
-    from qgis.core import QingApplication, QingAlgorithm
+    from qgis.core import QgsApplication, QgsProcessingAlgorithm
 
     _HAS_QGIS = True
 except ImportError:
@@ -37,14 +45,8 @@ class ModelForge:
 
     def initGui(self):
         icon_path = os.path.join(self.plugin_dir, "icon.png")
-        icon = (
-            QIcon(icon_path)
-            if os.path.exists(icon_path)
-            else QIcon.fromTheme("panel-show")
-        )
-        self.action_open = QAction(
-            icon, self.tr("Model Forge"), self.iface.mainWindow()
-        )
+        icon = QIcon(icon_path) if os.path.exists(icon_path) else QIcon.fromTheme("panel-show")
+        self.action_open = QAction(icon, self.tr("Model Forge"), self.iface.mainWindow())
         self.action_open.setStatusTip(self.tr("Open Model Forge panel"))
         self.action_open.triggered.connect(self.toggle_dock)
         self.iface.addToolBarIcon(self.action_open)
@@ -83,10 +85,11 @@ class ModelForge:
         self._load_user_algorithms()
 
     def _load_user_algorithms(self):
+        import warnings
+
         from .compiler_core.core.services.generation.custom_step_author import (
             _STEPS_DIR,
         )
-        import warnings
 
         if not os.path.isdir(_STEPS_DIR):
             return
@@ -133,9 +136,7 @@ class ModelForge:
                 break
 
         if found_alg is None:
-            raise RuntimeError(
-                f"No QgsProcessingAlgorithm subclass found in: {py_path}"
-            )
+            raise RuntimeError(f"No QgsProcessingAlgorithm subclass found in: {py_path}")
 
         self._provider.register_user_algorithm(found_alg)
         return f"{self._provider.id()}:{found_alg.name()}"

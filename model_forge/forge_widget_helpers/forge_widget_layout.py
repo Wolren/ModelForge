@@ -1,7 +1,7 @@
 import json
 
-from qgis.PyQt.QtWidgets import QHBoxLayout, QLabel, QComboBox, QCheckBox, QPushButton
-from qgis.PyQt.QtCore import Qt, QSettings
+from qgis.PyQt.QtCore import QSettings
+from qgis.PyQt.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QMessageBox, QPushButton
 
 from model_forge.compiler_core.core.services.layout.graph_layout import GraphLayoutService
 
@@ -12,17 +12,24 @@ class ForgeWidgetLayoutMixin:
     def _inject_compiler_controls(self):
         self.chk_two_phase.setText("MCP compiler pipeline (enabled)")
         self.chk_two_phase.setChecked(True)
-        self.chk_two_phase.setEnabled(False)
         self.chk_two_phase.setToolTip(
             "Uses the MCP compiler pipeline stages (parse, plan, resolve, validate, emit)."
         )
 
-        layout_algorithms = ["sugiyama", "topological", "axis_pack", "radial_shell", "ancestor_weighted"]
+        layout_algorithms = [
+            "sugiyama",
+            "topological",
+            "axis_pack",
+            "radial_shell",
+            "ancestor_weighted",
+        ]
         compiler_controls = QHBoxLayout()
         compiler_controls.setSpacing(4)
         compiler_controls.addWidget(QLabel("Profile:"))
         self.cmb_layout_profile_generate = QComboBox()
-        self.cmb_layout_profile_generate.addItems(["balanced", "compact", "dense", "spacious", "debug"])
+        self.cmb_layout_profile_generate.addItems(
+            ["balanced", "compact", "dense", "spacious", "debug"]
+        )
         self._configure_compact_combo(self.cmb_layout_profile_generate, 92, 7)
         compiler_controls.addWidget(self.cmb_layout_profile_generate)
         compiler_controls.addWidget(QLabel("Org:"))
@@ -70,7 +77,9 @@ class ForgeWidgetLayoutMixin:
         relayout_controls.setSpacing(4)
         relayout_controls.addWidget(QLabel("Profile:"))
         self.cmb_layout_profile_model = QComboBox()
-        self.cmb_layout_profile_model.addItems(["balanced", "compact", "dense", "spacious", "debug"])
+        self.cmb_layout_profile_model.addItems(
+            ["balanced", "compact", "dense", "spacious", "debug"]
+        )
         self._configure_compact_combo(self.cmb_layout_profile_model, 92, 7)
         relayout_controls.addWidget(self.cmb_layout_profile_model)
         relayout_controls.addWidget(QLabel("Org:"))
@@ -97,7 +106,9 @@ class ForgeWidgetLayoutMixin:
         relayout_actions.addWidget(self.btn_auto_wire_steps)
         self.btn_relayout_json = QPushButton("Re-layout")
         self.btn_relayout_json.setMaximumWidth(90)
-        self.btn_relayout_json.setToolTip("Apply the selected layout mode without regenerating the model.")
+        self.btn_relayout_json.setToolTip(
+            "Apply the selected layout mode without regenerating the model."
+        )
         self.btn_relayout_json.clicked.connect(self._on_relayout_json)
         self.btn_relayout_json.setEnabled(False)
         relayout_actions.addWidget(self.btn_relayout_json)
@@ -126,7 +137,9 @@ class ForgeWidgetLayoutMixin:
     def _save_layout_settings(self):
         s = QSettings()
         s.setValue("ModelForge/layout_profile", self.cmb_layout_profile_generate.currentText())
-        s.setValue("ModelForge/layout_orientation", self.cmb_layout_orientation_generate.currentText())
+        s.setValue(
+            "ModelForge/layout_orientation", self.cmb_layout_orientation_generate.currentText()
+        )
         s.setValue("ModelForge/layout_algorithm", self.cmb_layout_algorithm_generate.currentText())
 
     def _compiler_llm_config(self):
@@ -141,11 +154,19 @@ class ForgeWidgetLayoutMixin:
         }
 
     def _bind_layout_control_sync(self):
-        self.cmb_layout_profile_generate.currentIndexChanged.connect(self._on_layout_control_changed)
-        self.cmb_layout_orientation_generate.currentIndexChanged.connect(self._on_layout_control_changed)
-        self.cmb_layout_algorithm_generate.currentIndexChanged.connect(self._on_layout_control_changed)
+        self.cmb_layout_profile_generate.currentIndexChanged.connect(
+            self._on_layout_control_changed
+        )
+        self.cmb_layout_orientation_generate.currentIndexChanged.connect(
+            self._on_layout_control_changed
+        )
+        self.cmb_layout_algorithm_generate.currentIndexChanged.connect(
+            self._on_layout_control_changed
+        )
         self.cmb_layout_profile_model.currentIndexChanged.connect(self._on_layout_control_changed)
-        self.cmb_layout_orientation_model.currentIndexChanged.connect(self._on_layout_control_changed)
+        self.cmb_layout_orientation_model.currentIndexChanged.connect(
+            self._on_layout_control_changed
+        )
         self.cmb_layout_algorithm_model.currentIndexChanged.connect(self._on_layout_control_changed)
 
     def _on_layout_control_changed(self):
@@ -176,10 +197,22 @@ class ForgeWidgetLayoutMixin:
             self.cmb_layout_algorithm_model,
         )
         if kind == "profile":
-            return self.cmb_layout_profile_model.currentText() if sender in model_controls else self.cmb_layout_profile_generate.currentText()
+            return (
+                self.cmb_layout_profile_model.currentText()
+                if sender in model_controls
+                else self.cmb_layout_profile_generate.currentText()
+            )
         if kind == "orientation":
-            return self.cmb_layout_orientation_model.currentText() if sender in model_controls else self.cmb_layout_orientation_generate.currentText()
-        return self.cmb_layout_algorithm_model.currentText() if sender in model_controls else self.cmb_layout_algorithm_generate.currentText()
+            return (
+                self.cmb_layout_orientation_model.currentText()
+                if sender in model_controls
+                else self.cmb_layout_orientation_generate.currentText()
+            )
+        return (
+            self.cmb_layout_algorithm_model.currentText()
+            if sender in model_controls
+            else self.cmb_layout_algorithm_generate.currentText()
+        )
 
     @staticmethod
     def _set_combo_value(combo, value):
@@ -214,7 +247,9 @@ class ForgeWidgetLayoutMixin:
         try:
             self._set_combo_value(self.cmb_layout_profile_generate, self._saved_layout_profile)
             self._set_combo_value(self.cmb_layout_profile_model, self._saved_layout_profile)
-            self._set_combo_value(self.cmb_layout_orientation_generate, self._saved_layout_orientation)
+            self._set_combo_value(
+                self.cmb_layout_orientation_generate, self._saved_layout_orientation
+            )
             self._set_combo_value(self.cmb_layout_orientation_model, self._saved_layout_orientation)
             self._set_combo_value(self.cmb_layout_algorithm_generate, self._saved_layout_algorithm)
             self._set_combo_value(self.cmb_layout_algorithm_model, self._saved_layout_algorithm)

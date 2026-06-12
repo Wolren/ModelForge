@@ -2,29 +2,31 @@
 ModelForge MCP Server - plain Python, no external SDK.
 """
 from __future__ import annotations
+
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List
+from typing import Any
 
 
 @dataclass
 class MCPTool:
     name: str
     description: str
-    schema: Dict[str, Any]
-    handler: Callable[[Dict[str, Any]], Dict[str, Any]]
+    schema: dict[str, Any]
+    handler: Callable[[dict[str, Any]], dict[str, Any]]
 
 
 class ModelForgeMCPServer:
-    def __init__(self, tools: List[MCPTool]):
-        self._tools: Dict[str, MCPTool] = {t.name: t for t in tools}
+    def __init__(self, tools: list[MCPTool]):
+        self._tools: dict[str, MCPTool] = {t.name: t for t in tools}
 
-    def list_tools(self) -> List[Dict[str, Any]]:
+    def list_tools(self) -> list[dict[str, Any]]:
         return [
             {"name": t.name, "description": t.description, "inputSchema": t.schema}
             for t in self._tools.values()
         ]
 
-    def invoke(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    def invoke(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         tool = self._tools.get(name)
         if tool is None:
             raise ValueError(f"Unknown MCP tool: {name!r}")
@@ -32,7 +34,7 @@ class ModelForgeMCPServer:
         return tool.handler(args)
 
     @staticmethod
-    def _validate_args(tool: MCPTool, args: Dict[str, Any]) -> None:
+    def _validate_args(tool: MCPTool, args: dict[str, Any]) -> None:
         if not isinstance(args, dict):
             raise ValueError(f"Invalid args for {tool.name}: expected an object.")
 

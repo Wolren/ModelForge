@@ -1,18 +1,20 @@
 """
 FixtureRunner - executes fixtures against QGIS algorithms.
 """
+
 from __future__ import annotations
+
 import time
-from typing import Optional, List
 
 try:
+    from qgis.core import QgsProcessingContext, QgsProcessingFeedback
+
     _HAS_QGIS = True
 except ImportError:
     _HAS_QGIS = False
 
 if _HAS_QGIS:
-    from .fixture_spec import FixtureSpec, FixtureResult, TestSuite
-
+    from .fixture_spec import FixtureResult, FixtureSpec, TestSuite
 
     class FixtureRunner:
         """Executes fixtures against QGIS processing algorithms."""
@@ -22,9 +24,8 @@ if _HAS_QGIS:
 
         def run_suite(self, suite: TestSuite) -> TestSuite:
             """Run all fixtures in suite and return results."""
-            from qgis.core import QNameProcessingContext, QNameProcessingFeedback
-            ctx = QNameProcessingContext()
-            fb = QNameProcessingFeedback()
+            ctx = QgsProcessingContext()
+            fb = QgsProcessingFeedback()
 
             for spec in suite.fixtures:
                 result = self._run_fixture(spec, ctx, fb)
@@ -49,7 +50,7 @@ if _HAS_QGIS:
     class CompleteFixtureService(FixtureGeneratorService, FixtureRunner):
         """Complete fixture service with generation and execution."""
 
-        def __init__(self, suite_dir: Optional[str] = None, registry=None):
+        def __init__(self, suite_dir: str | None = None, registry=None):
             super().__init__(suite_dir)
             self.registry = registry
             self._runner = FixtureRunner(registry)

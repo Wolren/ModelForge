@@ -1,11 +1,16 @@
 """
 GraphLayoutService - layout algorithms for models without external dependencies.
 """
+
 from __future__ import annotations
-from typing import Dict, List, Optional, Set, Any
+
+import logging
 from collections import defaultdict, deque
+from typing import Any
 
 from .layout_config import LayoutConfig
+
+log = logging.getLogger(__name__)
 
 
 class GraphLayoutService:
@@ -16,15 +21,14 @@ class GraphLayoutService:
         new_json = svc.layout_model_json(old_json)  # returns updated dict copy
     """
 
-    def __init__(self, config: Optional[LayoutConfig] = None):
+    def __init__(self, config: LayoutConfig | None = None):
         self.config = config or LayoutConfig.balanced()
 
     def layout_plan(self, plan, incremental: bool = False):
         """Assign pos_x / pos_y to all inputs and steps in ExecutablePlan."""
         cfg = self.config
 
-        dep_map: Dict[str, List[str]] = defaultdict(list)
-        input_ids: Set[str] = {inp.name for inp in plan.inputs}
+        dep_map: dict[str, list[str]] = defaultdict(list)
 
         for step in plan.steps:
             for binding in step.parameters.values():
@@ -40,7 +44,7 @@ class GraphLayoutService:
             inp.pos_y = y_cursor
             y_cursor += self._plan_node_span(inp.label, cfg)
 
-        ranks_by_level: Dict[int, List[str]] = defaultdict(list)
+        ranks_by_level: dict[int, list[str]] = defaultdict(list)
         for sid, rank in ranks.items():
             ranks_by_level[rank].append(sid)
 
@@ -58,16 +62,15 @@ class GraphLayoutService:
 
     def layout_model_json(
         self,
-        model_json: Dict[str, Any],
+        model_json: dict[str, Any],
         mode: str = "balanced",
         orientation: str = "horizontal",
         strategy: str = "sugiyama",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Assign coordinates to model_json dict, returns updated copy."""
         import copy
 
         result = copy.deepcopy(model_json or {})
-        inputs = result.get("inputs", [])
         algorithms = result.get("algorithms", [])
 
         cfg = self._config_for_mode(mode)
@@ -76,7 +79,7 @@ class GraphLayoutService:
         if orientation == "vertical":
             self._apply_vertical_layout(result, cfg, strategy)
             return result
-        
+
         if orientation == "axis":
             self._apply_axis_layout(result, cfg, strategy)
             return result
@@ -97,7 +100,7 @@ class GraphLayoutService:
 
     def _apply_vertical_layout(
         self,
-        result: Dict[str, Any],
+        result: dict[str, Any],
         cfg: LayoutConfig,
         strategy: str,
     ):
@@ -114,7 +117,7 @@ class GraphLayoutService:
             inp["pos_y"] = top_margin
             x += max(cfg.h_spacing * 0.9, 280.0)
 
-        ranks_by_level: Dict[int, List] = defaultdict(list)
+        ranks_by_level: dict[int, list] = defaultdict(list)
         ranks = self._assign_json_ranks(algorithms, strategy)
         for alg in algorithms:
             rank = ranks.get(alg.get("id", ""), 0)
@@ -131,7 +134,7 @@ class GraphLayoutService:
 
     def _apply_axis_layout(
         self,
-        result: Dict[str, Any],
+        result: dict[str, Any],
         cfg: LayoutConfig,
         strategy: str,
     ):
@@ -149,8 +152,8 @@ class GraphLayoutService:
             y += self._json_node_span(inp, cfg)
 
         ranks = self._assign_json_ranks(algorithms, strategy)
-        
-        rank_groups: Dict[int, List[Dict]] = defaultdict(list)
+
+        rank_groups: dict[int, list[dict]] = defaultdict(list)
         for alg in algorithms:
             r = ranks.get(alg.get("id", ""), 0)
             rank_groups[r].append(alg)
@@ -165,9 +168,9 @@ class GraphLayoutService:
 
     def _apply_horizontal_layout(
         self,
-        result: Dict[str, Any],
-        algorithms: List[Dict],
-        ranks: Dict[str, int],
+        result: dict[str, Any],
+        algorithms: list[dict],
+        ranks: dict[str, int],
         cfg: LayoutConfig,
     ):
         inputs = result.get("inputs", [])
@@ -180,7 +183,7 @@ class GraphLayoutService:
             inp["pos_y"] = y
             y += self._json_node_span(inp, cfg)
 
-        ranks_by_level: Dict[int, List[Dict]] = defaultdict(list)
+        ranks_by_level: dict[int, list[dict]] = defaultdict(list)
         for alg in algorithms:
             rank = ranks.get(alg.get("id", ""), 0)
             ranks_by_level[rank].append(alg)
@@ -205,16 +208,23 @@ class GraphLayoutService:
             wrapped = max(1, (line_len + wrap_width - 1) // wrap_width)
             lines += wrapped
         result = max(1, lines)
-        print(f"[Layout] wrap: '{txt[:25]}...' -> {len(logical_lines)} lines -> {result} wrapped")
+        log.debug("wrap: '%s...' -> %d lines -> %d wrapped", txt[:25], len(logical_lines), result)
         return result
 
-    def _json_node_span(self, entry: Dict[str, Any], cfg: LayoutConfig) -> float:
-        text = entry.get("description") or entry.get("label") or entry.get("id") or entry.get("name") or ""
+    def _json_node_span(self, entry: dict[str, Any], cfg: LayoutConfig) -> float:
+        text = (
+            entry.get("description")
+            or entry.get("label")
+            or entry.get("id")
+            or entry.get("name")
+            or ""
+        )
         lines = self._estimate_wrap_lines(text, wrap_width=30)
         extra = max(0, lines - 1) * 28.0
         span = cfg.v_spacing + extra
-        # Debug: print node height calculation
-        print(f"[Layout] id={entry.get('id','')[:20]} text={text[:30]!r} lines={lines} span={span:.0f}")
+        log.debug(
+            "id=%s text=%r lines=%d span=%.0f", entry.get("id", "")[:20], text[:30], lines, span
+        )
         return span
 
     def _plan_node_span(self, label: str, cfg: LayoutConfig) -> float:
@@ -224,10 +234,10 @@ class GraphLayoutService:
 
     def _assign_layout_levels(
         self,
-        node_ids: List[str],
-        dep_map: Dict[str, List[str]],
+        node_ids: list[str],
+        dep_map: dict[str, list[str]],
         strategy: str = "sugiyama",
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         strategy = (strategy or "sugiyama").lower()
         if strategy == "topological":
             return self._assign_topological_levels(node_ids, dep_map)
@@ -241,11 +251,11 @@ class GraphLayoutService:
 
     def _assign_topological_levels(
         self,
-        node_ids: List[str],
-        dep_map: Dict[str, List[str]],
-    ) -> Dict[str, int]:
-        in_degree: Dict[str, int] = {nid: 0 for nid in node_ids}
-        rev_adj: Dict[str, List[str]] = defaultdict(list)
+        node_ids: list[str],
+        dep_map: dict[str, list[str]],
+    ) -> dict[str, int]:
+        in_degree: dict[str, int] = {nid: 0 for nid in node_ids}
+        rev_adj: dict[str, list[str]] = defaultdict(list)
         for src, targets in dep_map.items():
             for tgt in targets:
                 if tgt in in_degree:
@@ -258,7 +268,7 @@ class GraphLayoutService:
             if in_degree.get(nid, 0) == 0:
                 queue.append(nid)
 
-        order: List[str] = []
+        order: list[str] = []
         while queue:
             nid = queue.popleft()
             order.append(nid)
@@ -275,9 +285,9 @@ class GraphLayoutService:
 
     def _assign_radial_shell_levels(
         self,
-        node_ids: List[str],
-        dep_map: Dict[str, List[str]],
-    ) -> Dict[str, int]:
+        node_ids: list[str],
+        dep_map: dict[str, list[str]],
+    ) -> dict[str, int]:
         levels = self._assign_topological_levels(node_ids, dep_map)
         max_level = max(levels.values()) if levels else 1
         for nid in node_ids:
@@ -287,15 +297,15 @@ class GraphLayoutService:
 
     def _assign_ancestor_weighted_levels(
         self,
-        node_ids: List[str],
-        dep_map: Dict[str, List[str]],
-    ) -> Dict[str, int]:
+        node_ids: list[str],
+        dep_map: dict[str, list[str]],
+    ) -> dict[str, int]:
         ancestors = {nid: self.ancestors(nid, set()) for nid in node_ids}
         weights = {nid: len(a) for nid, a in ancestors.items()}
         sorted_nodes = sorted(node_ids, key=lambda n: weights.get(n, 0))
         return {nid: i for i, nid in enumerate(sorted_nodes)}
 
-    def ancestors(self, nid: str, trail: Set[str]) -> Set[str]:
+    def ancestors(self, nid: str, trail: set[str]) -> set[str]:
         if nid in trail:
             return trail
         trail = trail | {nid}
@@ -303,9 +313,9 @@ class GraphLayoutService:
 
     def _assign_ranks(
         self,
-        node_ids: List[str],
-        dep_map: Dict[str, List[str]],
-    ) -> Dict[str, int]:
+        node_ids: list[str],
+        dep_map: dict[str, list[str]],
+    ) -> dict[str, int]:
         in_degree = {nid: 0 for nid in node_ids}
         adj = defaultdict(list)
 
@@ -340,11 +350,11 @@ class GraphLayoutService:
 
     def _assign_json_ranks(
         self,
-        algorithms: List[Dict[str, Any]],
+        algorithms: list[dict[str, Any]],
         strategy: str,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         node_ids = [a.get("id", "") for a in algorithms if a.get("id")]
-        dep_map: Dict[str, List[str]] = defaultdict(list)
+        dep_map: dict[str, list[str]] = defaultdict(list)
 
         for alg in algorithms:
             alg_id = alg.get("id", "")

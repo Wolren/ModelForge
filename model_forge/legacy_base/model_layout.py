@@ -4,15 +4,14 @@ Computes a clean left-to-right DAG layout for model components
 before writing the final .model3 JSON file.
 """
 
-from collections import defaultdict, deque
-
+from collections import defaultdict
 
 # Layout constants (pixels in the Model Designer canvas)
-LEVEL_SPACING_X = 250   # horizontal gap between columns
-NODE_SPACING_Y = 140    # vertical gap between nodes in the same column
-INPUT_OFFSET_X = 50     # starting x for model inputs
-INPUT_SPACING_Y = 100   # vertical gap between model inputs
-ALGO_START_X = 350      # first algorithm column x
+LEVEL_SPACING_X = 250  # horizontal gap between columns
+NODE_SPACING_Y = 140  # vertical gap between nodes in the same column
+INPUT_OFFSET_X = 50  # starting x for model inputs
+INPUT_SPACING_Y = 100  # vertical gap between model inputs
+ALGO_START_X = 350  # first algorithm column x
 
 
 def compute_layout(model_json):
@@ -56,7 +55,6 @@ def compute_layout(model_json):
         level_groups[lev].sort(key=lambda a: id_order.get(a, 0))
 
     # Assign positions to algorithms
-    max_level = max(level_groups.keys()) if level_groups else 0
     for lev, aids in level_groups.items():
         x = ALGO_START_X + lev * LEVEL_SPACING_X
         total_height = (len(aids) - 1) * NODE_SPACING_Y
@@ -78,9 +76,7 @@ def _compute_level(node_id, parents, levels):
     if not parents[node_id]:
         levels[node_id] = 0
         return 0
-    max_parent_level = max(
-        _compute_level(p, parents, levels) for p in parents[node_id]
-    )
+    max_parent_level = max(_compute_level(p, parents, levels) for p in parents[node_id])
     levels[node_id] = max_parent_level + 1
     return levels[node_id]
 

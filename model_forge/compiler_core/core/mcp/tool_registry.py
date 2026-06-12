@@ -1,14 +1,29 @@
 """
-Builds the ModelForgeMCPServer with all six tools wired to the LLM backend.
+Builds the ModelForgeMCPServer with the inner tools the compiler
+pipeline actually calls. The pipeline invokes exactly three tools:
+
+* ``plan_workflow``        — semantic decomposition
+* ``resolve_algorithms``   — concrete algorithm + binding resolution
+* ``build_expression``     — QGIS expression string rendering
+
+The remaining tools that used to be registered here
+(``get_algorithm_docs``, ``suggest_layout``, ``generate_custom_step``)
+were not called by the pipeline and have been removed. If a future
+pipeline stage needs them, re-add them here deliberately and wire
+the corresponding call into ``CompilerPipeline.run``.
 """
+
 from __future__ import annotations
+
 import json
 import logging
-from .server import ModelForgeMCPServer, MCPTool
-from ..llm.base import LLMTimeoutError, LLMRequestError, LLMResponseError
+
+from ..llm.base import LLMRequestError, LLMResponseError, LLMTimeoutError
+from .server import MCPTool, ModelForgeMCPServer
 from .tools import (
-    plan_workflow, resolve_algorithms, build_expression,
-    get_algorithm_docs, suggest_layout, generate_custom_step,
+    build_expression,
+    plan_workflow,
+    resolve_algorithms,
 )
 
 log = logging.getLogger(__name__)
@@ -19,6 +34,7 @@ def build_server(llm_backend) -> ModelForgeMCPServer:
     llm_backend must implement:
         .chat(system_prompt: str, user_message: str) -> str
     """
+
     def _extract_json_payload(raw_text: str) -> str:
         raw = (raw_text or "").strip()
         if raw.startswith("```"):
@@ -35,12 +51,14 @@ def build_server(llm_backend) -> ModelForgeMCPServer:
         first = raw.find("{")
         last = raw.rfind("}")
         if first >= 0 and last > first:
-            return raw[first:last + 1].strip()
+            return raw[first : last + 1].strip()
         return raw
 
     def _call(tool_mod, args: dict) -> dict:
         base_message = tool_mod.build_user_message(args)
-        retry_suffix = "\n\nReturn only one valid JSON object. No prose, no markdown, no code fences."
+        retry_suffix = (
+            "\n\nReturn only one valid JSON object. No prose, no markdown, no code fences."
+        )
         attempts = 3
 
         for attempt in range(1, attempts + 1):
@@ -84,24 +102,6 @@ def build_server(llm_backend) -> ModelForgeMCPServer:
             description="Build a typed ExpressionNode from natural language.",
             schema=build_expression.SCHEMA,
             handler=lambda args: _call(build_expression, args),
-        ),
-        MCPTool(
-            name="get_algorithm_docs",
-            description="Return structured documentation for a QGIS algorithm.",
-            schema=get_algorithm_docs.SCHEMA,
-            handler=lambda args: _call(get_algorithm_docs, args),
-        ),
-        MCPTool(
-            name="suggest_layout",
-            description="Suggest groupings and annotations for graph layout.",
-            schema=suggest_layout.SCHEMA,
-            handler=lambda args: _call(suggest_layout, args),
-        ),
-        MCPTool(
-            name="generate_custom_step",
-            description="Generate a CustomStepSpec from a natural language description.",
-            schema=generate_custom_step.SCHEMA,
-            handler=lambda args: _call(generate_custom_step, args),
         ),
     ]
     return ModelForgeMCPServer(tools)

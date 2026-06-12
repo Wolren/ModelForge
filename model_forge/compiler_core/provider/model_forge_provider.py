@@ -8,38 +8,50 @@ A QgsProcessingProvider that exposes:
 
 Register it in the plugin's initProcessing() hook.
 """
+
 from __future__ import annotations
+
+import logging
 
 try:
     from qgis.core import QgsProcessingProvider
+
     _HAS_QGIS = True
 except ImportError:
     _HAS_QGIS = False
 
-if _HAS_QGIS:
-    class ModelForgeProvider(QgsProcessingProvider):
+log = logging.getLogger(__name__)
 
+if _HAS_QGIS:
+
+    class ModelForgeProvider(QgsProcessingProvider):
         def __init__(self):
             super().__init__()
             self._user_algorithms: list = []
 
-        def id(self)          -> str:  return "model_forge"
-        def name(self)        -> str:  return "ModelForge"
-        def longName(self)    -> str:  return "ModelForge AI Workflow Builder"
-        def versionInfo(self) -> str:  return "1.0.0"
+        def id(self) -> str:
+            return "model_forge"
+
+        def name(self) -> str:
+            return "ModelForge"
+
+        def longName(self) -> str:
+            return "ModelForge AI Workflow Builder"
+
+        def versionInfo(self) -> str:
+            return "1.0.0"
 
         def loadAlgorithms(self):
-            from .algorithms.mcp_algorithm    import ModelForgeMCPAlgorithm
-            from .algorithms.auto_layout      import AutoLayoutAlgorithm
-            from .algorithms.contract_test    import ContractTestAlgorithm
+            from .algorithms.auto_layout import AutoLayoutAlgorithm
+            from .algorithms.contract_test import ContractTestAlgorithm
             from .algorithms.custom_step_list import ListCustomStepsAlgorithm
+            from .algorithms.mcp_algorithm import ModelForgeMCPAlgorithm
 
             self.addAlgorithm(ModelForgeMCPAlgorithm())
             self.addAlgorithm(AutoLayoutAlgorithm())
             self.addAlgorithm(ContractTestAlgorithm())
             self.addAlgorithm(ListCustomStepsAlgorithm())
 
-            # Load all user-generated custom step algorithms
             for alg in self._user_algorithms:
                 self.addAlgorithm(alg)
 
@@ -48,6 +60,7 @@ if _HAS_QGIS:
             try:
                 new_name = alg.name()
             except Exception:
+                log.debug("register_user_algorithm: alg.name() failed")
                 new_name = None
 
             replaced = False
@@ -59,13 +72,14 @@ if _HAS_QGIS:
                             replaced = True
                             break
                     except Exception:
+                        log.debug("register_user_algorithm: existing.name() failed for idx %d", idx)
                         continue
             if not replaced:
                 self._user_algorithms.append(alg)
 
-            # Reload provider so QGIS picks up the new algorithm
             self.refreshAlgorithms()
 
 else:
+
     class ModelForgeProvider:
         pass

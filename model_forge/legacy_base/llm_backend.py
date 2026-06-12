@@ -5,11 +5,13 @@ Supports Ollama, OpenAI-compatible (DeepSeek, Qwen Cloud, etc.).
 """
 
 import json
-import time
-import urllib.request
-import urllib.error
+import logging
 import re
+import time
+import urllib.error
+import urllib.request
 
+log = logging.getLogger(__name__)
 
 SYSTEM_PROMPT_PLAN = """You are a QGIS Processing workflow planner.
 
@@ -142,7 +144,6 @@ RESPOND WITH ONLY the corrected JSON:
 
 
 class LLMBackend:
-
     # Predefined backend profiles
     BACKENDS = {
         "ollama": {
@@ -205,6 +206,7 @@ class LLMBackend:
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     return resp.status == 200
         except Exception:
+            log.warning("_test_connection failed for %s", self.url)
             return False
 
     def generate_plan(self, description, context_text):
@@ -213,26 +215,36 @@ class LLMBackend:
 
     def generate_model_from_plan(self, plan_json, context_text):
         user_msg = (
-            "HIGH-LEVEL PLAN:\n" + json.dumps(plan_json, indent=2)
-            + "\n\nALGORITHM SIGNATURES AND CONTEXT:\n" + context_text
+            "HIGH-LEVEL PLAN:\n"
+            + json.dumps(plan_json, indent=2)
+            + "\n\nALGORITHM SIGNATURES AND CONTEXT:\n"
+            + context_text
         )
         result = self._call_llm(SYSTEM_PROMPT_BUILD, user_msg)
         return self._validate_model_structure(result)
 
     def generate_single_pass(self, description, model_name, model_group, context_text):
         user_msg = (
-            "Model name: " + model_name + "\nModel group: " + model_group
-            + "\n\nWorkflow description:\n" + description + "\n\n" + context_text
+            "Model name: "
+            + model_name
+            + "\nModel group: "
+            + model_group
+            + "\n\nWorkflow description:\n"
+            + description
+            + "\n\n"
+            + context_text
         )
         result = self._call_llm(SYSTEM_PROMPT_BUILD, user_msg)
         return self._validate_model_structure(result)
 
     def repair_model(self, workflow_json, errors, context_text):
         user_msg = (
-            "MODEL JSON:\n" + json.dumps(workflow_json, indent=2)
+            "MODEL JSON:\n"
+            + json.dumps(workflow_json, indent=2)
             + "\n\nVALIDATION ERRORS / USER FEEDBACK:\n"
             + "\n".join("- " + str(e) for e in errors)
-            + "\n\nALGORITHM CATALOG:\n" + str(context_text)
+            + "\n\nALGORITHM CATALOG:\n"
+            + str(context_text)
         )
         result = self._call_llm(SYSTEM_PROMPT_REPAIR, user_msg)
         return self._validate_model_structure(result)
@@ -343,7 +355,8 @@ class LLMBackend:
                 try:
                     error_body = e.read().decode("utf-8")[:500]
                 except Exception:
-                    pass
+                    log.warning("Failed to decode error body from HTTP %s", e.code)
+                    error_body = ""
                 raise ValueError("HTTP Error " + str(e.code) + ": " + error_body)
 
             except urllib.error.URLError as e:
@@ -451,6 +464,4 @@ class LLMBackend:
         elif len(snippet) > 800:
             snippet = snippet[:800] + "\n...[truncated]..."
 
-        raise ValueError(
-            "LLM did not return valid JSON. Raw response snippet:\n\n" + snippet
-        )
+        raise ValueError("LLM did not return valid JSON. Raw response snippet:\n\n" + snippet)

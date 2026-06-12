@@ -3,6 +3,7 @@ Stage 1 - IntentParser
 Cleans and normalises the raw user text before sending to the LLM planner.
 """
 from __future__ import annotations
+
 import re
 from dataclasses import dataclass
 

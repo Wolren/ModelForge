@@ -2,8 +2,9 @@
 XML helpers for model builder bridge - pure Python XML manipulation.
 """
 from __future__ import annotations
+
 import xml.etree.ElementTree as ET
-from typing import Any, Dict
+from typing import Any
 
 
 def _opt(name: str | None, typ: str, value: str | None = None) -> ET.Element:
@@ -17,7 +18,7 @@ def _opt(name: str | None, typ: str, value: str | None = None) -> ET.Element:
     return el
 
 
-def _source_element(pbind: Dict[str, Any]) -> ET.Element:
+def _source_element(pbind: dict[str, Any]) -> ET.Element:
     """Create parameter source binding XML element."""
     src_map = ET.Element("Option")
     src_map.set("type", "Map")
@@ -64,7 +65,7 @@ def _find_child_node(root: ET.Element, actual_child_id: str) -> ET.Element | Non
 def _inject_params_xml(
     tree: ET.ElementTree,
     actual_child_id: str,
-    bindings: Dict[str, Any],
+    bindings: dict[str, Any],
 ) -> bool:
     """Inject parameter bindings into child algorithm XML node."""
     child_node = _find_child_node(tree.getroot(), actual_child_id)
@@ -92,9 +93,9 @@ def _inject_params_xml(
 
 
 def _resolve_ids(
-    bindings: Dict[str, Any],
-    id_map: Dict[str, str],
-) -> Dict[str, Any]:
+    bindings: dict[str, Any],
+    id_map: dict[str, str],
+) -> dict[str, Any]:
     """Resolve user IDs to actual QGIS IDs."""
     resolved = {}
     for pname, pbind in bindings.items():

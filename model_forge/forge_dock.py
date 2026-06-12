@@ -8,7 +8,8 @@ Use at your own risk.
 """
 
 from qgis.PyQt.QtCore import Qt
-from qgis.PyQt.QtWidgets import QDockWidget, QWidget, QVBoxLayout
+from qgis.PyQt.QtWidgets import QDockWidget, QVBoxLayout, QWidget
+
 from .forge_widget import ForgeWidget
 
 

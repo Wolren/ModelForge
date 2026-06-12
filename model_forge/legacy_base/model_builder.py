@@ -3,26 +3,29 @@ Converts LLM-generated workflow JSON into a QgsProcessingModelAlgorithm.
 Includes validation pass and error collection.
 """
 
+import logging
+
+log = logging.getLogger(__name__)
+
 from qgis.core import (
+    QgsProcessing,
     QgsProcessingModelAlgorithm,
     QgsProcessingModelChildAlgorithm,
     QgsProcessingModelChildParameterSource,
     QgsProcessingModelParameter,
-    QgsProcessingParameterVectorLayer,
-    QgsProcessingParameterRasterLayer,
-    QgsProcessingParameterNumber,
-    QgsProcessingParameterString,
-    QgsProcessingParameterField,
-    QgsProcessingParameterEnum,
-    QgsProcessingParameterCrs,
-    QgsProcessingParameterExtent,
-    QgsProcessingParameterBoolean,
-    QgsProcessingParameterMultipleLayers,
     QgsProcessingParameterBand,
-    QgsProcessing,
+    QgsProcessingParameterBoolean,
+    QgsProcessingParameterCrs,
+    QgsProcessingParameterEnum,
+    QgsProcessingParameterExtent,
+    QgsProcessingParameterField,
+    QgsProcessingParameterMultipleLayers,
+    QgsProcessingParameterNumber,
+    QgsProcessingParameterRasterLayer,
+    QgsProcessingParameterString,
+    QgsProcessingParameterVectorLayer,
 )
 from qgis.PyQt.QtCore import QPointF
-
 
 INPUT_TYPE_MAP = {
     "vector": QgsProcessingParameterVectorLayer,
@@ -48,7 +51,6 @@ GEOMETRY_TYPE_MAP = {
 
 
 class ModelBuilder:
-
     X_START = 200
     Y_START = 50
     Y_STEP = 120
@@ -70,12 +72,12 @@ class ModelBuilder:
                 is_valid, issues = result
                 if not is_valid:
                     for issue in issues:
-                        msg = issue.message() if hasattr(issue, 'message') else str(issue)
+                        msg = issue.message() if hasattr(issue, "message") else str(issue)
                         if msg:
                             errors.append(msg)
             elif isinstance(result, list):
                 for issue in result:
-                    msg = issue.message() if hasattr(issue, 'message') else str(issue)
+                    msg = issue.message() if hasattr(issue, "message") else str(issue)
                     if msg:
                         errors.append(msg)
         except Exception as e:
@@ -88,15 +90,16 @@ class ModelBuilder:
                     child_valid, child_issues = child_result
                     if not child_valid:
                         for issue in child_issues:
-                            msg = issue.message() if hasattr(issue, 'message') else str(issue)
+                            msg = issue.message() if hasattr(issue, "message") else str(issue)
                             if msg:
                                 errors.append("[" + child_id + "] " + msg)
                 elif isinstance(child_result, list):
                     for issue in child_result:
-                        msg = issue.message() if hasattr(issue, 'message') else str(issue)
+                        msg = issue.message() if hasattr(issue, "message") else str(issue)
                         if msg:
                             errors.append("[" + child_id + "] " + msg)
             except Exception:
+                log.warning("Failed to validate child %s", child_id)
                 pass
 
         return errors
@@ -115,48 +118,36 @@ class ModelBuilder:
             if inp_type in ("vector", "layer"):
                 geom = inp.get("geometry", -1)
                 param_def = param_class(
-                    name, label,
-                    types=[GEOMETRY_TYPE_MAP.get(geom, QgsProcessing.TypeVectorAnyGeometry)]
+                    name,
+                    label,
+                    types=[GEOMETRY_TYPE_MAP.get(geom, QgsProcessing.TypeVectorAnyGeometry)],
                 )
             elif inp_type == "raster":
                 param_def = param_class(name, label)
             elif inp_type == "number":
                 param_def = param_class(
-                    name, label,
+                    name,
+                    label,
                     type=QgsProcessingParameterNumber.Double,
                     defaultValue=inp.get("default", 0),
                 )
             elif inp_type == "field":
-                param_def = param_class(
-                    name, label,
-                    parentLayerParameterName=inp.get("parent", "")
-                )
+                param_def = param_class(name, label, parentLayerParameterName=inp.get("parent", ""))
             elif inp_type == "multilayer":
-                param_def = param_class(
-                    name, label,
-                    layerType=QgsProcessing.TypeVectorAnyGeometry
-                )
+                param_def = param_class(name, label, layerType=QgsProcessing.TypeVectorAnyGeometry)
             elif inp_type == "boolean":
-                param_def = param_class(
-                    name, label,
-                    defaultValue=inp.get("default", False)
-                )
+                param_def = param_class(name, label, defaultValue=inp.get("default", False))
             elif inp_type == "crs":
-                param_def = param_class(
-                    name, label,
-                    defaultValue=inp.get("default", "EPSG:4326")
-                )
+                param_def = param_class(name, label, defaultValue=inp.get("default", "EPSG:4326"))
             elif inp_type == "enum":
                 param_def = param_class(
-                    name, label,
+                    name,
+                    label,
                     options=inp.get("options", []),
                     defaultValue=inp.get("default", 0),
                 )
             else:
-                param_def = param_class(
-                    name, label,
-                    defaultValue=inp.get("default", "")
-                )
+                param_def = param_class(name, label, defaultValue=inp.get("default", ""))
 
             component = QgsProcessingModelParameter(name)
             component.setPosition(QPointF(x, y))
@@ -194,14 +185,23 @@ class ModelBuilder:
         if isinstance(source_def, dict):
             src_type = source_def.get("type", "static")
             if src_type == "model_input":
-                return [QgsProcessingModelChildParameterSource.fromModelParameter(source_def["name"])]
+                return [
+                    QgsProcessingModelChildParameterSource.fromModelParameter(source_def["name"])
+                ]
             elif src_type == "child_output":
-                return [QgsProcessingModelChildParameterSource.fromChildOutput(
-                    source_def["child_id"], source_def["output_name"])]
+                return [
+                    QgsProcessingModelChildParameterSource.fromChildOutput(
+                        source_def["child_id"], source_def["output_name"]
+                    )
+                ]
             elif src_type == "expression":
-                return [QgsProcessingModelChildParameterSource.fromExpression(source_def["expression"])]
+                return [
+                    QgsProcessingModelChildParameterSource.fromExpression(source_def["expression"])
+                ]
             elif src_type == "static":
-                return [QgsProcessingModelChildParameterSource.fromStaticValue(source_def.get("value"))]
+                return [
+                    QgsProcessingModelChildParameterSource.fromStaticValue(source_def.get("value"))
+                ]
 
         elif isinstance(source_def, (str, int, float, bool)):
             return [QgsProcessingModelChildParameterSource.fromStaticValue(source_def)]

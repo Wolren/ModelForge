@@ -1,10 +1,51 @@
+# ─── Project artifacts ────────────────────────────────────────────────
 /model_forge.zip
 /model_forge_last.zip
 /model_forge_second.zip
+/model_forge-*.zip
 /todo.txt
 /archive/
+
+# ─── Build outputs ────────────────────────────────────────────────────
+/build/
+/dist/
+*.egg-info/
+/model_forge.egg-info/
+
+# ─── Runtime data / caches ───────────────────────────────────────────
+.symbology-style.db
+symbology-style.db
+/model_forge/resources/
+/model_forge/resources/*
+
+# ─── IDE / editor ────────────────────────────────────────────────────
 .idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ─── Python ──────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.so
+*.egg
+
+# ─── Lint / test caches ──────────────────────────────────────────────
 .ruff_cache/
 .pytest_cache/
+.coverage
+htmlcov/
+.pytest_tmp/
+
+# ─── Virtualenvs / package managers ──────────────────────────────────
+.venv/
+venv/
+env/
+.env
+.env.local
+
+# ─── Top-level ad-hoc scripts (move into tests/ before committing) ─
+/test_*.py
+/check_*.py

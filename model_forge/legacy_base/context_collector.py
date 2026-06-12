@@ -6,13 +6,16 @@ Collects rich context from the current QGIS session:
 """
 
 import json
+
 from qgis.core import (
-    Qgis, QgsApplication, QgsProject,
-    QgsVectorLayer, QgsRasterLayer,
+    Qgis,
+    QgsApplication,
     QgsProcessingParameterDefinition,
     QgsProcessingParameterEnum,
+    QgsProject,
+    QgsRasterLayer,
+    QgsVectorLayer,
 )
-
 
 CURATED_ALGORITHMS = [
     "native:clip", "native:dissolve", "native:buffer", "native:intersection",

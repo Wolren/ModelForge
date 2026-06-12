@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "model-forge"
+version = "1.0.1"
+description = "QGIS plugin converting natural-language geoprocessing descriptions into Processing models"
+license = { text = "GPL-2.0-or-later" }
+requires-python = ">=3.10"
+
+[project.scripts]
+model-forge = "model_forge.mcp_server:main"
+
+[project.optional-dependencies]
+mcp = [
+    "mcp>=1.0",
+    "uvicorn>=0.27",
+]
+dev = [
+    "pytest>=7",
+    "pytest-qt",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+    "mcp>=1.0",
+    "uvicorn>=0.27",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "N",   # naming
+    "UP",  # pyupgrade
+    "B",   # bugbear
+    "SIM", # simplify
+    "PLC", # pylint convention
+    "PLE", # pylint error
+    "PLW", # pylint warning
+]
+ignore = [
+    "E501",   # line-length (handled by formatter)
+    "PLC0414",# import alias too long
+    "N802",   # function name should be lowercase (qgis compat)
+    "N803",   # argument name should be lowercase (qgis compat)
+    "N806",   # variable in function should be lowercase (qgis compat)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["model_forge"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]

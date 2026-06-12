@@ -8,29 +8,56 @@ Model Forge main widget: Generate / Model / Settings tabs.
 """
 
 import json
+import logging
+import os
 import re
+import sys
 
-from qgis.PyQt.QtCore import Qt, QThread, pyqtSignal, QSettings
-from qgis.PyQt.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
-from qgis.PyQt.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
-    QPushButton, QCheckBox, QListWidget, QListWidgetItem,
-    QTextEdit, QLineEdit, QComboBox,
-    QMessageBox, QTabWidget, QAbstractItemView, QSlider,
-    QSpinBox, QFileDialog, QGridLayout, QProgressBar,
-)
+log = logging.getLogger(__name__)
+
 from qgis.core import QgsProject
+from qgis.PyQt.QtCore import QSettings, Qt, QThread, pyqtSignal
+from qgis.PyQt.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
+
+from model_forge.compiler_core.core.services.secure_storage import (
+    delete_api_key,
+    get_api_key,
+    set_api_key,
+)
+from qgis.PyQt.QtWidgets import (
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSlider,
+    QSpinBox,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from model_forge.compiler_core.core.context_collector import ContextCollector
-from model_forge.legacy_base.llm_backend import LLMBackend
+from model_forge.compiler_core.core.services.mermaid_renderer import to_mermaid
 from model_forge.compiler_core.ui.model_builder_bridge import ModelBuilderBridge
+from model_forge.legacy_base.llm_backend import LLMBackend
 from model_forge.legacy_base.model_layout import compute_layout
 
 SETTINGS_PREFIX = "ModelForge/"
 
 
 class JsonHighlighter(QSyntaxHighlighter):
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.fmt_key = QTextCharFormat()
@@ -69,13 +96,13 @@ class JsonHighlighter(QSyntaxHighlighter):
             if not already:
                 self.setFormat(m.start(1) - 1, m.end(1) - m.start(1) + 2, self.fmt_string)
 
-        for m in re.finditer(r'\b(-?\d+\.?\d*)\b', text):
+        for m in re.finditer(r"\b(-?\d+\.?\d*)\b", text):
             self.setFormat(m.start(), m.end() - m.start(), self.fmt_number)
 
-        for m in re.finditer(r'\b(true|false|null)\b', text):
+        for m in re.finditer(r"\b(true|false|null)\b", text):
             self.setFormat(m.start(), m.end() - m.start(), self.fmt_keyword)
 
-        for m in re.finditer(r'[\[\]{}]', text):
+        for m in re.finditer(r"[\[\]{}]", text):
             self.setFormat(m.start(), 1, self.fmt_bracket)
 
 
@@ -84,7 +111,9 @@ class GenerateWorker(QThread):
     error = pyqtSignal(str)
     progress = pyqtSignal(str)
 
-    def __init__(self, backend, description, model_name, model_group, context_text, two_phase=False):
+    def __init__(
+        self, backend, description, model_name, model_group, context_text, two_phase=False
+    ):
         super().__init__()
         self.backend = backend
         self.description = description
@@ -131,7 +160,6 @@ class RepairWorker(QThread):
 
 
 class ForgeWidget(QWidget):
-
     def __init__(self, iface, parent=None):
         super().__init__(parent)
         self.iface = iface
@@ -144,8 +172,8 @@ class ForgeWidget(QWidget):
         self._designer_dlg = None
         self.worker = None
 
-        self._load_settings()
         self._init_ui()
+        self._load_settings()
         self._load_layers()
         self._connect_project_signals()
 
@@ -267,7 +295,14 @@ class ForgeWidget(QWidget):
         self.lbl_validity.setWordWrap(True)
         layout.addWidget(self.lbl_validity)
 
-        layout.addWidget(QLabel("Model JSON (editable):"))
+        self._model_tabs = QTabWidget()
+
+        # ---- JSON tab ----
+        json_tab = QWidget()
+        json_layout = QVBoxLayout()
+        json_layout.setContentsMargins(0, 4, 0, 0)
+
+        json_layout.addWidget(QLabel("Model JSON (editable):"))
         self.txt_model_json = QTextEdit()
         self.txt_model_json.setStyleSheet(
             "QTextEdit { background-color: #282C34; color: #ABB2BF; "
@@ -277,8 +312,55 @@ class ForgeWidget(QWidget):
         font.setStyleHint(QFont.Monospace)
         self.txt_model_json.setFont(font)
         self.highlighter = JsonHighlighter(self.txt_model_json.document())
-        layout.addWidget(self.txt_model_json, stretch=3)
+        json_layout.addWidget(self.txt_model_json, stretch=1)
 
+        json_tab.setLayout(json_layout)
+        self._model_tabs.addTab(json_tab, "JSON")
+
+        # ---- Graph tab ----
+        graph_tab = QWidget()
+        graph_layout = QVBoxLayout()
+        graph_layout.setContentsMargins(0, 4, 0, 0)
+
+        graph_layout.addWidget(QLabel("Mermaid flowchart:"))
+        self._mermaid_view = None
+        from model_forge.compiler_core.ui.mermaid_view import MermaidGraphView
+
+        self._mermaid_view = MermaidGraphView()
+        if self._mermaid_view.is_available:
+            graph_layout.addWidget(self._mermaid_view, stretch=1)
+
+        self.txt_mermaid = QTextEdit()
+        self.txt_mermaid.setReadOnly(True)
+        self.txt_mermaid.setStyleSheet(
+            "QTextEdit { background-color: #1e1e1e; color: #d4d4d4; "
+            "font-family: Consolas, monospace; font-size: 11px; }"
+        )
+        self.txt_mermaid.setFont(font)
+        if not self._mermaid_view.is_available:
+            graph_layout.addWidget(self.txt_mermaid, stretch=1)
+        else:
+            self.txt_mermaid.setMaximumHeight(200)
+            graph_layout.addWidget(self.txt_mermaid)
+
+        mermaid_btn_row = QHBoxLayout()
+        self.btn_copy_mermaid = QPushButton("Copy Mermaid")
+        self.btn_copy_mermaid.setToolTip("Copy mermaid markdown to clipboard")
+        self.btn_copy_mermaid.clicked.connect(self._copy_mermaid)
+        mermaid_btn_row.addWidget(self.btn_copy_mermaid)
+
+        self.btn_refresh_mermaid = QPushButton("Refresh Graph")
+        self.btn_refresh_mermaid.clicked.connect(self._refresh_mermaid)
+        mermaid_btn_row.addWidget(self.btn_refresh_mermaid)
+        mermaid_btn_row.addStretch()
+        graph_layout.addLayout(mermaid_btn_row)
+
+        graph_tab.setLayout(graph_layout)
+        self._model_tabs.addTab(graph_tab, "Graph")
+
+        layout.addWidget(self._model_tabs, stretch=3)
+
+        # ---- Buttons ----
         btn_row = QHBoxLayout()
 
         self.btn_rebuild = QPushButton("Rebuild model from JSON above")
@@ -298,6 +380,7 @@ class ForgeWidget(QWidget):
 
         layout.addLayout(btn_row)
 
+        # ---- Debug / Improve ----
         improve_group = QGroupBox("Debug / Improve")
         improve_layout = QVBoxLayout()
         improve_layout.setSpacing(4)
@@ -307,7 +390,7 @@ class ForgeWidget(QWidget):
             "Describe what to fix, improve, or add to the current model...\n"
             "e.g. 'Add a dissolve step after the buffer' or 'Fix the field name to population'"
         )
-        self.txt_improve_prompt.setMaximumHeight(100)
+        self.txt_improve_prompt.setMaximumHeight(80)
         improve_layout.addWidget(self.txt_improve_prompt)
 
         improve_btn_layout = QHBoxLayout()
@@ -318,7 +401,9 @@ class ForgeWidget(QWidget):
         improve_btn_layout.addWidget(self.btn_auto_repair)
 
         self.btn_improve = QPushButton("Improve")
-        self.btn_improve.setToolTip("Send the current JSON + your feedback to the LLM for improvement")
+        self.btn_improve.setToolTip(
+            "Send the current JSON + your feedback to the LLM for improvement"
+        )
         self.btn_improve.clicked.connect(self._on_improve)
         self.btn_improve.setEnabled(False)
         improve_btn_layout.addWidget(self.btn_improve)
@@ -391,28 +476,12 @@ class ForgeWidget(QWidget):
         self.spn_max_algos = QSpinBox()
         self.spn_max_algos.setMinimum(10)
         self.spn_max_algos.setMaximum(500)
-        self.spn_max_algos.setValue(60)
+        self.spn_max_algos.setValue(100)
         self.spn_max_algos.setToolTip(
             "Maximum number of algorithm signatures to include in the LLM context."
         )
         count_layout.addWidget(self.spn_max_algos)
         algo_layout.addLayout(count_layout)
-
-        self.chk_include_all_native = QCheckBox("Include all native: algorithms")
-        self.chk_include_all_native.setChecked(True)
-        algo_layout.addWidget(self.chk_include_all_native)
-
-        self.chk_include_gdal = QCheckBox("Include gdal: algorithms")
-        self.chk_include_gdal.setChecked(True)
-        algo_layout.addWidget(self.chk_include_gdal)
-
-        self.chk_include_grass = QCheckBox("Include grass: algorithms")
-        self.chk_include_grass.setChecked(False)
-        algo_layout.addWidget(self.chk_include_grass)
-
-        self.chk_include_saga = QCheckBox("Include saga: algorithms")
-        self.chk_include_saga.setChecked(False)
-        algo_layout.addWidget(self.chk_include_saga)
 
         self.chk_include_all_providers = QCheckBox("Include ALL providers (full registry scan)")
         self.chk_include_all_providers.setChecked(False)
@@ -421,8 +490,78 @@ class ForgeWidget(QWidget):
         )
         algo_layout.addWidget(self.chk_include_all_providers)
 
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setMaximumHeight(200)
+
+        provider_container = QWidget()
+        provider_grid = QGridLayout()
+        provider_grid.setSpacing(2)
+        provider_grid.setContentsMargins(0, 0, 0, 0)
+
+        self._provider_widgets: dict[str, dict] = {}
+
+        try:
+            from qgis.core import QgsApplication
+
+            registry = QgsApplication.processingRegistry()
+            providers = sorted(
+                registry.providers(),
+                key=lambda p: (0 if p.id() == "native" else 1 if p.id() == "gdal" else 2, p.id()),
+            )
+        except Exception:
+            log.warning("Failed to load QGIS processing providers")
+            providers = []
+
+        for i, provider in enumerate(providers):
+            pid = provider.id()
+            pname = provider.name() or pid
+            default_on = pid in ("native", "gdal")
+            alg_count = len(list(provider.algorithms()))
+
+            chk = QCheckBox(f"{pid} ({alg_count})")
+            chk.setChecked(default_on)
+            chk.setToolTip(pname)
+            row, col = divmod(i, 2)
+            provider_grid.addWidget(chk, row, col)
+            self._provider_widgets[pid] = {"chk": chk}
+
+        provider_container.setLayout(provider_grid)
+        scroll.setWidget(provider_container)
+
+        algo_layout.addWidget(scroll)
         algo_group.setLayout(algo_layout)
         layout.addWidget(algo_group)
+
+        # ── MCP Server section ──────────────────────────────────────────
+        mcp_group = QGroupBox("MCP Server")
+        mcp_layout = QGridLayout()
+        mcp_layout.setSpacing(4)
+
+        mcp_layout.addWidget(QLabel("Port:"), 0, 0)
+        self.spn_mcp_port = QSpinBox()
+        self.spn_mcp_port.setRange(1024, 65535)
+        self.spn_mcp_port.setValue(9090)
+        self.spn_mcp_port.setToolTip("Port for MCP SSE server (connect your MCP client here)")
+        mcp_layout.addWidget(self.spn_mcp_port, 0, 1)
+
+        self.btn_mcp_start = QPushButton("Start MCP Server")
+        self.btn_mcp_start.setStyleSheet("font-weight: bold;")
+        self.btn_mcp_start.clicked.connect(self._on_mcp_toggle)
+        mcp_layout.addWidget(self.btn_mcp_start, 1, 0)
+
+        self.lbl_mcp_status = QLabel("Stopped")
+        self.lbl_mcp_status.setStyleSheet("color: gray;")
+        mcp_layout.addWidget(self.lbl_mcp_status, 1, 1)
+
+        btn_mcp_config = QPushButton("Copy Claude Config")
+        btn_mcp_config.setToolTip("Copy the Claude Desktop config entry to clipboard")
+        btn_mcp_config.clicked.connect(self._on_copy_mcp_config)
+        mcp_layout.addWidget(btn_mcp_config, 2, 0, 1, 2)
+
+        mcp_group.setLayout(mcp_layout)
+        layout.addWidget(mcp_group)
 
         btn_apply = QPushButton("Apply Settings")
         btn_apply.setStyleSheet("font-weight: bold;")
@@ -431,14 +570,6 @@ class ForgeWidget(QWidget):
 
         layout.addStretch()
         tab.setLayout(layout)
-
-        idx = self.cmb_backend.findData(self.saved_backend)
-        if idx >= 0:
-            self.cmb_backend.setCurrentIndex(idx)
-        self.txt_url.setText(self.saved_url)
-        self.txt_api_key.setText(self.saved_api_key)
-        self.txt_model.setText(self.saved_model)
-        self.sld_temperature.setValue(int(self.saved_temperature * 10))
 
         return tab
 
@@ -488,9 +619,13 @@ class ForgeWidget(QWidget):
     def _on_test_connection(self):
         self._apply_settings()
         if self.backend.test_connection():
-            QMessageBox.information(self, "Connection OK", "Successfully connected to the LLM backend.")
+            QMessageBox.information(
+                self, "Connection OK", "Successfully connected to the LLM backend."
+            )
         else:
-            QMessageBox.warning(self, "Connection Failed", "Could not connect. Check URL and API key.")
+            QMessageBox.warning(
+                self, "Connection Failed", "Could not connect. Check URL and API key."
+            )
 
     def _apply_settings(self):
         key = self.cmb_backend.itemData(self.cmb_backend.currentIndex())
@@ -505,36 +640,76 @@ class ForgeWidget(QWidget):
         self.status_label.setText("Settings applied.")
 
     def _get_algo_config(self):
-        return {
+        config: dict = {
             "max_algorithms": self.spn_max_algos.value(),
-            "include_native": self.chk_include_all_native.isChecked(),
-            "include_gdal": self.chk_include_gdal.isChecked(),
-            "include_grass": self.chk_include_grass.isChecked(),
-            "include_saga": self.chk_include_saga.isChecked(),
             "include_all": self.chk_include_all_providers.isChecked(),
+            "provider_ids": [],
         }
+        for pid, w in self._provider_widgets.items():
+            if w["chk"].isChecked():
+                config["provider_ids"].append(pid)
+
+        return config
+
+    def _restore_provider_settings(self):
+        s = QSettings()
+        s.beginGroup(SETTINGS_PREFIX + "providers")
+        for pid, w in self._provider_widgets.items():
+            enabled = s.value(f"{pid}/enabled")
+            if enabled is not None:
+                try:
+                    w["chk"].setChecked(str(enabled).lower() == "true")
+                except Exception:
+                    pass
+        s.endGroup()
 
     def _load_settings(self):
         s = QSettings()
-        self.saved_backend = s.value(SETTINGS_PREFIX + "backend", "ollama")
-        self.saved_url = s.value(SETTINGS_PREFIX + "url", "http://localhost:11434")
-        self.saved_api_key = s.value(SETTINGS_PREFIX + "api_key", "")
-        self.saved_model = s.value(SETTINGS_PREFIX + "model", "qwen2.5-coder:7b")
-        try:
-            self.saved_temperature = float(s.value(SETTINGS_PREFIX + "temperature", 0.2))
-        except (TypeError, ValueError):
-            self.saved_temperature = 0.2
+        key = s.value(SETTINGS_PREFIX + "backend")
+        if key is not None:
+            idx = self.cmb_backend.findData(key)
+            if idx >= 0:
+                self.cmb_backend.setCurrentIndex(idx)
+        url = s.value(SETTINGS_PREFIX + "url")
+        if url:
+            self.txt_url.setText(url)
+        api_key = s.value(SETTINGS_PREFIX + "api_key")
+        if api_key:
+            self.txt_api_key.setText(api_key)
+        else:
+            stored = get_api_key()
+            if stored:
+                self.txt_api_key.setText(stored)
+        model = s.value(SETTINGS_PREFIX + "model")
+        if model:
+            self.txt_model.setText(model)
+        temp = s.value(SETTINGS_PREFIX + "temperature")
+        if temp is not None:
+            try:
+                self.sld_temperature.setValue(int(float(temp) * 10))
+            except (ValueError, TypeError):
+                pass
+        self._restore_provider_settings()
 
     def _save_settings(self):
         s = QSettings()
         key = self.cmb_backend.itemData(self.cmb_backend.currentIndex())
         s.setValue(SETTINGS_PREFIX + "backend", key)
         s.setValue(SETTINGS_PREFIX + "url", self.txt_url.text())
-        s.setValue(SETTINGS_PREFIX + "api_key", self.txt_api_key.text())
+        api_key_text = self.txt_api_key.text()
+        s.setValue(SETTINGS_PREFIX + "api_key", api_key_text)
+        set_api_key(api_key_text)
         s.setValue(SETTINGS_PREFIX + "model", self.txt_model.text())
         s.setValue(SETTINGS_PREFIX + "temperature", self.sld_temperature.value() / 10.0)
 
+        # Persist provider selection
+        s.beginGroup(SETTINGS_PREFIX + "providers")
+        for pid, w in self._provider_widgets.items():
+            s.setValue(f"{pid}/enabled", w["chk"].isChecked())
+        s.endGroup()
+
     def _on_generate(self):
+        self._stop_worker("worker")
         description = self.txt_description.toPlainText().strip()
         if not description:
             QMessageBox.warning(self, "Model Forge", "Please enter a workflow description.")
@@ -551,8 +726,10 @@ class ForgeWidget(QWidget):
         self.lbl_status.setText("Starting generation...")
 
         self.worker = GenerateWorker(
-            self.backend, description,
-            self.txt_model_name.text(), self.txt_model_group.text(),
+            self.backend,
+            description,
+            self.txt_model_name.text(),
+            self.txt_model_group.text(),
             self.current_context_text,
             two_phase=self.chk_two_phase.isChecked(),
         )
@@ -565,7 +742,7 @@ class ForgeWidget(QWidget):
         self.progress_bar.hide()
         self.btn_generate.setEnabled(True)
 
-        plan = workflow.pop("_plan", None)
+        workflow.pop("_plan", None)
 
         if "inputs" not in workflow or "algorithms" not in workflow:
             self.lbl_status.setText("LLM response missing required keys.")
@@ -592,6 +769,7 @@ class ForgeWidget(QWidget):
 
         self._try_build_model(workflow)
         self._refresh_context_for_improve()
+        self._refresh_mermaid()
 
     def _on_generate_error(self, error_msg):
         self.progress_bar.hide()
@@ -603,7 +781,6 @@ class ForgeWidget(QWidget):
         selected_layers = self._get_selected_layers()
         algo_config = self._get_algo_config()
         self.current_context_text = self.context_collector.collect(selected_layers, algo_config)
-
 
     def _try_build_model(self, workflow):
         try:
@@ -620,6 +797,24 @@ class ForgeWidget(QWidget):
             self.btn_open_designer.setEnabled(False)
             self.status_label.setText("Build warning: " + str(e))
 
+    def _refresh_mermaid(self):
+        workflow = self._current_model_json
+        if not workflow:
+            self.txt_mermaid.setPlainText("flowchart TD\n  empty[No model data]")
+            return
+        try:
+            mermaid_text = to_mermaid(workflow)
+            self.txt_mermaid.setPlainText(mermaid_text)
+            if self._mermaid_view and self._mermaid_view.is_available:
+                self._mermaid_view.set_mermaid(mermaid_text)
+        except Exception as e:
+            self.txt_mermaid.setPlainText(f'flowchart TD\n  error["Mermaid error: {e}"]')
+
+    def _copy_mermaid(self):
+        from qgis.PyQt.QtWidgets import QApplication
+
+        QApplication.clipboard().setText(self.txt_mermaid.toPlainText())
+
     def _on_rebuild_from_json(self):
         text = self.txt_model_json.toPlainText().strip()
         if not text:
@@ -632,8 +827,9 @@ class ForgeWidget(QWidget):
             return
 
         if "inputs" not in workflow or "algorithms" not in workflow:
-            QMessageBox.warning(self, "Model Forge",
-                                "JSON must have 'inputs' and 'algorithms' keys.")
+            QMessageBox.warning(
+                self, "Model Forge", "JSON must have 'inputs' and 'algorithms' keys."
+            )
             return
 
         self._current_model_json = workflow
@@ -643,6 +839,7 @@ class ForgeWidget(QWidget):
 
     def _copy_json(self):
         from qgis.PyQt.QtWidgets import QApplication
+
         QApplication.clipboard().setText(self.txt_model_json.toPlainText())
         self.status_label.setText("JSON copied to clipboard.")
 
@@ -674,8 +871,9 @@ class ForgeWidget(QWidget):
     def _on_open_designer(self):
         """Open the current model in QGIS Model Designer."""
         import tempfile
-        from qgis.core import QgsProcessingModelAlgorithm
+
         from processing.modeler.ModelerDialog import ModelerDialog
+        from qgis.core import QgsProcessingModelAlgorithm
 
         if not self._current_model_json:
             QMessageBox.warning(self, "Model Forge", "No current workflow to open.")
@@ -691,13 +889,20 @@ class ForgeWidget(QWidget):
             tmp_path = tmp.name
             tmp.close()
 
-            if not model.toFile(tmp_path):
-                QMessageBox.warning(self, "Model Forge",
-                                    "Could not create temporary model file.")
-                return
+            try:
+                if not model.toFile(tmp_path):
+                    QMessageBox.warning(
+                        self, "Model Forge", "Could not create temporary model file."
+                    )
+                    return
 
-            file_model = QgsProcessingModelAlgorithm()
-            file_model.fromFile(tmp_path)
+                file_model = QgsProcessingModelAlgorithm()
+                file_model.fromFile(tmp_path)
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
             dlg = ModelerDialog(file_model)
             dlg.show()
@@ -707,7 +912,8 @@ class ForgeWidget(QWidget):
 
         except Exception as e:
             QMessageBox.critical(
-                self, "Model Forge",
+                self,
+                "Model Forge",
                 "Could not open Designer:\n" + str(e),
             )
 
@@ -735,7 +941,10 @@ class ForgeWidget(QWidget):
         self.btn_improve.setEnabled(False)
 
         self.repair_worker = RepairWorker(
-            self.backend, workflow, list(errors), self.current_context_text,
+            self.backend,
+            workflow,
+            list(errors),
+            self.current_context_text,
         )
         self.repair_worker.finished.connect(self._on_repair_finished)
         self.repair_worker.error.connect(self._on_repair_error)
@@ -768,7 +977,10 @@ class ForgeWidget(QWidget):
         all_errors = list(errors) + [f"USER FEEDBACK: {feedback}"]
 
         self.repair_worker = RepairWorker(
-            self.backend, workflow, all_errors, self.current_context_text,
+            self.backend,
+            workflow,
+            all_errors,
+            self.current_context_text,
         )
         self.repair_worker.finished.connect(self._on_repair_finished)
         self.repair_worker.error.connect(self._on_repair_error)
@@ -780,7 +992,9 @@ class ForgeWidget(QWidget):
         self.btn_improve.setEnabled(True)
 
         if not isinstance(repaired, dict):
-            self.lbl_validity.setText(f"Repair failed: expected dict, got {type(repaired).__name__}")
+            self.lbl_validity.setText(
+                f"Repair failed: expected dict, got {type(repaired).__name__}"
+            )
             self.lbl_validity.setStyleSheet("color: red;")
             return
 
@@ -835,3 +1049,72 @@ class ForgeWidget(QWidget):
                             f"unknown child_id '{ref}'."
                         )
         return errors
+
+    # ── MCP Server handlers ────────────────────────────────────────────────
+
+    def _on_mcp_toggle(self):
+        from model_forge.mcp_server.server import is_running, start_server, stop_server
+
+        if is_running():
+            stop_server()
+            self.btn_mcp_start.setText("Start MCP Server")
+            self.lbl_mcp_status.setText("Stopped")
+            self.lbl_mcp_status.setStyleSheet("color: gray;")
+            return
+
+        port = self.spn_mcp_port.value()
+        llm_config = self._get_mcp_llm_config()
+
+        try:
+            start_server(host="127.0.0.1", port=port, llm_config=llm_config)
+            self.btn_mcp_start.setText("Stop MCP Server")
+            self.lbl_mcp_status.setText(f"Running on port {port}")
+            self.lbl_mcp_status.setStyleSheet("color: green; font-weight: bold;")
+        except Exception as e:
+            QMessageBox.critical(self, "MCP Server", f"Failed to start: {e}")
+            self.lbl_mcp_status.setText("Error")
+            self.lbl_mcp_status.setStyleSheet("color: red;")
+
+    def _get_mcp_llm_config(self) -> dict:
+        backend = self.cmb_backend.currentData() or "ollama"
+        backend_info = LLMBackend.BACKENDS.get(backend, {})
+        return {
+            "provider": backend_info.get("type", backend),
+            "model": self.txt_model.text().strip() or "qwen2.5-coder:7b",
+            "base_url": self.txt_url.text().strip() or "http://localhost:11434",
+            "api_key": self.txt_api_key.text().strip() or "",
+            "temperature": self.sld_temperature.value() / 10.0,
+            "timeout": 120,
+        }
+
+    def _on_copy_mcp_config(self):
+        port = self.spn_mcp_port.value()
+        python = sys.executable or "python3"
+        config = {
+            "mcpServers": {
+                "model-forge": {
+                    "command": python,
+                    "args": ["-m", "model_forge.mcp_server"],
+                    "url": f"http://127.0.0.1:{port}/sse",
+                }
+            }
+        }
+        from qgis.PyQt.QtWidgets import QApplication
+
+        QApplication.clipboard().setText(json.dumps(config, indent=2))
+        QMessageBox.information(
+            self,
+            "MCP Config",
+            "Claude Desktop config copied to clipboard.\n\n"
+            "Paste it into: %%APPDATA%%\\Claude\\claude_desktop_config.json\n"
+            "Then start the MCP server here first.",
+        )
+
+    def _stop_worker(self, attr: str = "worker"):
+        w = getattr(self, attr, None)
+        if w is None:
+            return
+        if w.isRunning():
+            w.quit()
+            w.wait(3000)
+        setattr(self, attr, None)
