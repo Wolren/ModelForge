@@ -18,6 +18,9 @@ from model_forge.forge_widget_helpers.forge_widget_history import (
     ForgeWidgetHistoryMixin,
 )
 from model_forge.forge_widget_helpers.forge_widget_layout import ForgeWidgetLayoutMixin
+from model_forge.forge_widget_helpers.forge_widget_map import (
+    ForgeWidgetMapMixin,
+)
 
 from .compiler_core.core.ir import IssueLevel
 from .compiler_core.ui.custom_step_dialog import CustomStepDialog
@@ -25,7 +28,12 @@ from .compiler_core.ui.model_builder_bridge import ModelBuilderBridge
 from .forge_generate_worker import ForgeGenerateWorker
 
 
-class ForgeWidget(ForgeWidgetLayoutMixin, ForgeWidgetHistoryMixin, LegacyForgeWidget):
+class ForgeWidget(
+    ForgeWidgetLayoutMixin,
+    ForgeWidgetHistoryMixin,
+    ForgeWidgetMapMixin,
+    LegacyForgeWidget,
+):
     def __init__(self, iface, plugin=None, parent=None):
         super().__init__(iface, parent)
         self.plugin = plugin
@@ -37,6 +45,8 @@ class ForgeWidget(ForgeWidgetLayoutMixin, ForgeWidgetHistoryMixin, LegacyForgeWi
         self._inject_compiler_controls()
         self._inject_history_tab()
         self._refresh_history_list()
+        if hasattr(self, "_inject_map_tab"):
+            self._inject_map_tab()
         self.btn_cancel.clicked.connect(self._on_cancel_generate)
 
     def _load_compiler_settings(self):

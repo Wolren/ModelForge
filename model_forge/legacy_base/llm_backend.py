@@ -143,6 +143,63 @@ RESPOND WITH ONLY the corrected JSON:
 }"""
 
 
+SYSTEM_PROMPT_LAYOUT_DESIGN = """You are a QGIS cartographer. Given a user's plain-language map request and the live QGIS project context, decide how the print map should look.
+
+The user has described a map in one or two sentences. You decide:
+- title: a short, professional title for the map (max ~80 chars).
+- subtitle: a one-line description below the title (max ~120 chars).
+- template: one of "default" (A4 portrait, full legend), "scientific" (Letter portrait, monochrome, metadata), "presentation" (16:9, no scale bar), "minimal" (A4 landscape, no legend). Pick the one that fits the request.
+- layer_ids: a JSON array of QGIS layer ids to include. Pick the most relevant 5-12 layers from the project - filter out the noise. Use the EXACT ids from the project context.
+- style_hints: a JSON object keyed by layer_id with a one-line style hint per layer, e.g. {"roads": "blue line", "parcels": "green polygons"}. Keep it brief; the layout builder does geometry.
+
+CRITICAL RULES:
+1. Output ONLY a JSON object - no markdown, no code fences, no commentary.
+2. Use EXACT layer ids from the project context's "layers" list. Do not invent ids.
+3. If no layers match the intent, return an empty layer_ids array.
+4. Title and subtitle should be professional cartography style, not chatty.
+5. Template choice: "scientific" for academic papers, "presentation" for client decks, "default" for internal reports, "minimal" for at-a-glance maps.
+
+RESPOND WITH ONLY JSON:
+{
+  "title": "...",
+  "subtitle": "...",
+  "template": "default|scientific|presentation|minimal",
+  "layer_ids": ["layer_id_1", "layer_id_2"],
+  "style_hints": {"layer_id_1": "hint"}
+}"""
+
+
+SYSTEM_PROMPT_LAYOUT_EVAL = """You are a QGIS layout quality inspector. Given a text description of the layout that was just generated, evaluate it against proper cartographic rules and suggest concrete fixes.
+
+The layout description includes:
+- Template, title, page size
+- Layer count
+- Map position / size / extent
+- Legend position / size
+- Scale bar position / size  
+- North arrow position / size
+
+CRITICAL RULES:
+- Legend must sit below the map, not overlaying it
+- Scale bar and north arrow must have frame+background enabled
+- North arrow in upper-left of the map area
+- Scale bar in lower-left of the map area  
+- At most 12 layers in the legend (pick the most relevant)
+- No overlapping items
+- Title at the top, subtitle below it
+
+Check the layout description. If it violates any rule, return "status": "fix" with the specific fix. If it passes, return "status": "ok".
+
+RESPOND WITH ONLY JSON:
+{
+  "status": "ok" or "fix",
+  "fixes": [
+    {"item": "legend", "action": "move", "y": 225, "reason": "legend overlaps map data"}
+  ],
+  "message": "Short summary of what was wrong"
+}"""
+
+
 class LLMBackend:
     # Predefined backend profiles
     BACKENDS = {
@@ -237,6 +294,125 @@ class LLMBackend:
         result = self._call_llm(SYSTEM_PROMPT_BUILD, user_msg)
         return self._validate_model_structure(result)
 
+    def choose_layout_design(self, intent: str, project_context: str) -> dict:
+        """Cartographer-style LLM call.
+
+        Given a plain-language map intent and a stringified
+        project context (the project's loaded layers with
+        their names / geometry kinds / extents), ask the LLM
+        to decide: title, subtitle, template, which layers to
+        include, and brief style hints per layer.
+
+        Returns a dict with the keys
+        ``{title, subtitle, template, layer_ids, style_hints}``.
+        Falls back to sensible defaults on parse error so the
+        caller always gets a usable dict.
+        """
+        user_msg = "Map intent:\n" + intent + "\n\nProject context:\n" + project_context
+        result = self._call_llm(SYSTEM_PROMPT_LAYOUT_DESIGN, user_msg)
+        if not isinstance(result, dict):
+            return self._layout_design_fallback(intent)
+        # Normalise + validate.
+        template = str(result.get("template", "default")).lower().strip()
+        if template not in {"default", "scientific", "presentation", "minimal"}:
+            template = "default"
+        layer_ids = result.get("layer_ids") or []
+        if not isinstance(layer_ids, list):
+            layer_ids = []
+        layer_ids = [str(x) for x in layer_ids if x]
+        return {
+            "title": str(result.get("title", intent or "Project Map"))[:120],
+            "subtitle": str(result.get("subtitle", ""))[:200],
+            "template": template,
+            "layer_ids": layer_ids,
+            "style_hints": result.get("style_hints", {}) or {},
+        }
+
+    def _layout_design_fallback(self, intent: str) -> dict:
+        """Default layout design when the LLM call fails to parse."""
+        return {
+            "title": intent or "Project Map",
+            "subtitle": "",
+            "template": "default",
+            "layer_ids": [],
+            "style_hints": {},
+        }
+
+    def evaluate_layout_spec(self, spec_summary: str, intent: str) -> dict:
+        """Evaluate a layout's spec text and suggest fixes.
+
+        ``spec_summary`` is a human-readable text block describing
+        the layout (title, layers, positions, sizes). The LLM
+        checks cartographic rules and returns either "ok" or
+        "fix" with specific item-level changes.
+
+        Falls back to {"status": "ok", "fixes": []} on any
+        parse failure so the loop never hangs.
+        """
+        if not spec_summary:
+            return {"status": "ok", "fixes": [], "message": ""}
+        try:
+            result = self._call_llm(SYSTEM_PROMPT_LAYOUT_EVAL, spec_summary)
+        except Exception:  # noqa: BLE001
+            return {"status": "ok", "fixes": [], "message": ""}
+        if not isinstance(result, dict):
+            return {"status": "ok", "fixes": [], "message": ""}
+        status = str(result.get("status", "ok")).lower().strip()
+        if status not in ("ok", "fix"):
+            status = "ok"
+        fixes = result.get("fixes") or []
+        if not isinstance(fixes, list):
+            fixes = []
+        return {
+            "status": status,
+            "fixes": fixes,
+            "message": str(result.get("message", "")),
+        }
+
+    def evaluate_layout_image(self, image_path: str, intent: str) -> dict:
+        """Evaluate a rendered layout image and suggest fixes.
+
+        ``image_path`` is a PNG exported from ``QgsLayoutExporter``.
+        The LLM sees the actual rendered layout and catches visual
+        issues the text-only spec can't (overlapping frames, ugly
+        colors, white-on-white elements).
+
+        Falls back to the text-only spec evaluation when the
+        image file can't be read.
+        """
+        system_prompt = (
+            "You are a QGIS layout quality inspector. You are given "
+            "a rendered image of a map layout (title, map area, north "
+            "arrow, scale bar, legend). Identify any cartographic "
+            "issues: overlapping items, missing frames, legend sitting "
+            "on top of map data, north arrow not in upper-left, scale "
+            "bar not visible, legend too large or too small. "
+            "Return a JSON object with status 'ok' or 'fix', "
+            "a list of fixes, and a short message.\n\nRESPOND WITH ONLY JSON:\n"
+            '{"status": "ok|fix", "fixes": [...], "message": "..."}'
+        )
+        try:
+            import os as _os
+
+            if not _os.path.isfile(image_path):
+                return {"status": "ok", "fixes": [], "message": ""}
+            result = self._call_llm_with_image(system_prompt, intent, image_path)
+        except Exception:  # noqa: BLE001
+            return {"status": "ok", "fixes": [], "message": ""}
+        if not isinstance(result, dict):
+            return {"status": "ok", "fixes": [], "message": ""}
+        status = str(result.get("status", "ok")).lower().strip()
+        if status not in ("ok", "fix"):
+            status = "ok"
+        fixes = result.get("fixes") or []
+        if not isinstance(fixes, list):
+            fixes = []
+        return {
+            "status": status,
+            "fixes": fixes,
+            "message": str(result.get("message", "")),
+        }
+
     def repair_model(self, workflow_json, errors, context_text):
         user_msg = (
             "MODEL JSON:\n"
@@ -272,6 +448,84 @@ class LLMBackend:
             return self._call_ollama(system_prompt, user_message)
         else:
             return self._call_openai(system_prompt, user_message)
+
+    def _call_llm_with_image(self, system_prompt, user_message, image_path):
+        """Call the LLM with a text prompt + an image file.
+
+        ``image_path`` is a path to a PNG image. The image is
+        base64-encoded and sent inline. Supports both Ollama's
+        ``type: image`` format and OpenAI's ``image_url`` format.
+        """
+        import base64
+
+        with open(image_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+        if self.backend == "ollama":
+            return self._call_ollama_multimodal(system_prompt, user_message, b64)
+        else:
+            return self._call_openai_multimodal(system_prompt, user_message, b64)
+
+    def _call_ollama_multimodal(self, system_prompt, user_message, b64_img):
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_message},
+                        {"type": "image", "image": b64_img},
+                    ],
+                },
+            ],
+            "stream": False,
+            "format": "json",
+            "options": {"temperature": self.temperature},
+        }
+        return self._post_and_parse_json(payload)
+
+    def _call_openai_multimodal(self, system_prompt, user_message, b64_img):
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_message},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{b64_img}"},
+                        },
+                    ],
+                },
+            ],
+            "temperature": self.temperature,
+            "max_tokens": 4096,
+        }
+        return self._post_and_parse_json(payload)
+
+    def _post_and_parse_json(self, payload):
+        """POST to the LLM endpoint and parse the JSON response."""
+        import urllib.request as _req
+
+        data = json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self.backend != "ollama":
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        url = (
+            self.url.rstrip("/") + "/api/chat"
+            if self.backend == "ollama"
+            else self.url.rstrip("/") + "/chat/completions"
+        )
+        req = _req.Request(url, data=data, headers=headers, method="POST")
+        with _req.urlopen(req, timeout=300) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        if self.backend == "ollama":
+            raw = body.get("message", {}).get("content", "")
+        else:
+            raw = body["choices"][0]["message"]["content"]
+        return self._parse_json_response(raw)
 
     def _call_ollama(self, system_prompt, user_message):
         payload = {

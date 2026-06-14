@@ -53,7 +53,7 @@ try:
 except ImportError:
     pass
 
-# ─── Lazy QGIS imports ──────────────────────────────────────────────────
+# --- Lazy QGIS imports --------------------------------------------------
 
 if _HAS_QGIS:
     from qgis.core import (
@@ -62,7 +62,7 @@ if _HAS_QGIS:
     )
 
 
-# ─── Lazy compiler imports ──────────────────────────────────────────────
+# --- Lazy compiler imports ----------------------------------------------
 
 
 def _import_compiler():
@@ -127,7 +127,7 @@ def _import_mermaid():
     return to_mermaid
 
 
-# ─── Server state ────────────────────────────────────────────────────────
+# --- Server state --------------------------------------------------------
 
 
 class ServerState:
@@ -193,7 +193,7 @@ class ServerState:
             # Prefer iface.mapCanvas() (the active GUI canvas). Fall back to
             # the standalone QGIS map canvas for headless / no-iface
             # contexts. ``activeMessageBar()`` is the QGIS *message bar*
-            # UI element, not a canvas — calling ``.extent()`` on it
+            # UI element, not a canvas - calling ``.extent()`` on it
             # always returns ``None`` or errors out. This was the wrong
             # API call up through v1.0.x.
             canvas = None
@@ -244,7 +244,7 @@ class ServerState:
             return {}
 
 
-# ─── Global server reference ────────────────────────────────────────────
+# --- Global server reference --------------------------------------------
 
 _server_instance: FastMCP | None = None
 _server_thread: threading.Thread | None = None
@@ -264,7 +264,7 @@ def _get_state() -> ServerState:
     return _server_state
 
 
-# ─── Tool helpers ───────────────────────────────────────────────────────
+# --- Tool helpers -------------------------------------------------------
 
 
 def _model_json_from_str(model_json_str: str) -> dict:
@@ -303,7 +303,7 @@ def _validate_model_json(model: dict) -> list[str]:
     return errors
 
 
-# ─── Tool: Context ──────────────────────────────────────────────────────
+# --- Tool: Context ------------------------------------------------------
 
 
 def _register_context_tools(mcp: FastMCP) -> None:
@@ -448,7 +448,7 @@ def _register_context_tools(mcp: FastMCP) -> None:
         )
 
 
-# ─── Tool: Algorithms ───────────────────────────────────────────────────
+# --- Tool: Algorithms ---------------------------------------------------
 
 
 _FUZZY_STOPWORDS = frozenset(
@@ -478,7 +478,7 @@ _FUZZY_STOPWORDS = frozenset(
 def _fuzzy_score(query: str, alg_id: str, name: str) -> float:
     """Token-overlap similarity between ``query`` and an algorithm.
 
-    Returns a float in ``[0.0, 1.0+]`` — values above 1.0 are
+    Returns a float in ``[0.0, 1.0+]`` - values above 1.0 are
     possible when *every* query token matches and the candidate has
     no extra tokens (perfect overlap bonus).
     """
@@ -502,7 +502,7 @@ def _register_algorithm_tools(mcp: FastMCP) -> None:
             "Search available QGIS Processing algorithms by name, ID, or provider prefix. "
             "Returns algorithm IDs, display names, groups, and parameter counts. "
             "Use with query='native:buffer' or query='buffer' or provider='native'. "
-            "Essential before generate_model — provides the algorithm IDs the LLM planner "
+            "Essential before generate_model - provides the algorithm IDs the LLM planner "
             "needs to construct valid step definitions. Set max_results up to 200."
         )
     )
@@ -627,7 +627,7 @@ def _register_algorithm_tools(mcp: FastMCP) -> None:
             "Get full parameter and output documentation for a QGIS Processing algorithm. "
             "Returns parameter names, types, descriptions, optional flags, enum options, "
             "and output definitions. Use this when you need to construct correct parameter "
-            "bindings in a model — e.g., to know that native:buffer has 'INPUT', 'DISTANCE', "
+            "bindings in a model - e.g., to know that native:buffer has 'INPUT', 'DISTANCE', "
             "'SEGMENTS', 'END_CAP_STYLE', 'JOIN_STYLE', 'MITER_LIMIT', 'DISSOLVE', 'OUTPUT'."
         )
     )
@@ -755,7 +755,7 @@ def _register_algorithm_tools(mcp: FastMCP) -> None:
         )
 
 
-# ─── Export-format helpers (Phase 7) ───────────────────────────────────
+# --- Export-format helpers (Phase 7) -----------------------------------
 
 
 def _model_output_schema(model: dict) -> dict[str, list[tuple[str, int]]]:
@@ -794,7 +794,7 @@ def _model_output_schema(model: dict) -> dict[str, list[tuple[str, int]]]:
 
 def _model_to_geojson_contract(model: dict) -> dict:
     """Build a placeholder GeoJSON FeatureCollection describing the
-    model's output schema. No geometries — this is a contract artifact,
+    model's output schema. No geometries - this is a contract artifact,
     not actual data.
     """
     schema = _model_output_schema(model)
@@ -899,7 +899,43 @@ def _model_to_qgis_process_recipe(model: dict) -> dict:
     }
 
 
-# ─── Tool: Generation ──────────────────────────────────────────────────
+def _guess_geometry_kind(alg: dict[str, Any]) -> str:
+    """Best-effort guess of the geometry kind for a step.
+
+    We read the algorithm_id - if it carries a known hint
+    (e.g. ``native:buffer`` produces the same kind as its input;
+    ``native:centroids`` produces points) we use that. Otherwise
+    we look at the upstream ``model_input`` and the user's
+    ``_mf_layer_geometry_kind`` hint. Falls back to ``polygon``
+    because the LLM-emitted model JSON rarely carries geometry
+    metadata and polygon is the conservative default.
+    """
+    alg_id = str(alg.get("algorithm_id", "") or "").lower()
+    # Algorithm id hints.
+    HINTS = {
+        "native:centroids": "point",
+        "native:pointstolines": "line",
+        "native:linestopolygons": "polygon",
+        "native:pointstopolygons": "polygon",
+        "native:rasterize": "raster",
+        "gdal:warpreproject": "raster",
+        "gdal:translate": "raster",
+    }
+    if alg_id in HINTS:
+        return HINTS[alg_id]
+    # Suffix-based heuristic.
+    for suffix, kind in (
+        ("polygon", "polygon"),
+        ("line", "line"),
+        ("point", "point"),
+        ("raster", "raster"),
+    ):
+        if alg_id.endswith(":" + suffix) or suffix in alg_id:
+            return kind
+    return "polygon"
+
+
+# --- Tool: Generation --------------------------------------------------
 
 
 def _make_progress_callback(base: Any | None, cancel_event: threading.Event | None):
@@ -1562,7 +1598,7 @@ def _register_generation_tools(mcp: FastMCP) -> None:
             "Cancel an in-flight ``generate_model`` job. The job_id is the "
             "``job_id`` field in the response of a previous ``generate_model`` "
             "call, or in the progress notifications emitted via "
-            "``progress_token``. Cancellation is cooperative — the running "
+            "``progress_token``. Cancellation is cooperative - the running "
             "worker checks the cancel event between stages and short-circuits. "
             "Returns ``{cancelled: true}`` if a job was signalled."
         )
@@ -1607,7 +1643,371 @@ def _register_generation_tools(mcp: FastMCP) -> None:
         return json.dumps(status, indent=2, ensure_ascii=False)
 
 
-# ─── Tool: Server Management ────────────────────────────────────────────
+# --- Tool: Map building (print layout + symbology + execution) ---
+
+
+def _register_map_tools(mcp: FastMCP) -> None:
+    @mcp.tool(
+        description=(
+            "Generate a QGIS print layout template (.qpt) for the given model JSON. "
+            "Choose a template: 'default', 'scientific', 'presentation', or 'minimal'. "
+            "The LLM writes the title / subtitle text; the verifier checks structural "
+            "correctness (margins, overlaps, required items) before returning. "
+            "If ``verify=True`` (default), the layout is checked against the ruleset "
+            "and a list of violations is included in the response. Pass "
+            "``output_layer_ids`` to control what shows in the legend."
+        )
+    )
+    async def generate_print_layout(
+        model_json_str: str,
+        output_path: str,
+        template: str = "default",
+        title: str = "",
+        subtitle: str = "",
+        crs: str = "",
+        author: str = "",
+        output_layer_ids: list[str] | None = None,
+        verify: bool = True,
+    ) -> str:
+        try:
+            from model_forge.compiler_core.core.services.map_builder.qpt_builder import build_qpt
+            from model_forge.compiler_core.core.services.map_builder.layout_verifier import (
+                verify_qpt,
+            )
+        except ImportError as e:
+            return error_response_json(
+                ConfigError(
+                    "Map-building modules are not available in this environment.",
+                    details={"exception": str(e)},
+                )
+            )
+
+        try:
+            model = _model_json_from_str(model_json_str)
+        except json.JSONDecodeError as e:
+            return error_response_json(
+                InvalidJSONError(
+                    f"Invalid model JSON: {e}",
+                    details={"line": e.lineno, "column": e.colno},
+                )
+            )
+
+        try:
+            qpt_xml = build_qpt(
+                template=template,
+                title=title,
+                subtitle=subtitle,
+                crs=crs,
+                author=author,
+                output_layer_ids=output_layer_ids,
+            )
+        except Exception as e:  # noqa: BLE001
+            return error_response_json(
+                ConfigError(
+                    f"qpt_builder failed: {e}",
+                    details={"template": template, "exception_type": type(e).__name__},
+                )
+            )
+
+        try:
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(qpt_xml)
+        except OSError as e:
+            return error_response_json(
+                ConfigError(
+                    f"Failed to write .qpt to {output_path}: {e}",
+                    details={"output_path": output_path},
+                )
+            )
+
+        result: dict = {
+            "status": "ok",
+            "path": output_path,
+            "template": template,
+            "bytes_written": len(qpt_xml.encode("utf-8")),
+        }
+        if verify:
+            try:
+                report = verify_qpt(qpt_xml)
+                result["verification"] = report.to_dict()
+            except Exception as e:  # noqa: BLE001
+                result["verification"] = {
+                    "passed": False,
+                    "error": f"verifier raised: {e}",
+                }
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.tool(
+        description=(
+            "Verify a .qpt print layout document against the layout ruleset. "
+            "Returns a list of violations plus a pass/fail verdict. Use this in "
+            "a re-try loop: if the LLM emits a layout that fails verification, "
+            "include the violation messages as constraints for the next emission."
+        )
+    )
+    async def verify_layout(qpt_xml_or_path: str) -> str:
+        try:
+            from model_forge.compiler_core.core.services.map_builder.layout_verifier import (
+                verify_qpt,
+            )
+        except ImportError as e:
+            return error_response_json(
+                ConfigError(
+                    "layout_verifier is not available.",
+                    details={"exception": str(e)},
+                )
+            )
+        # Accept either inline XML or a path to a .qpt file.
+        qpt_xml = qpt_xml_or_path
+        if "\n" not in qpt_xml and "<Layout" not in qpt_xml:
+            try:
+                with open(qpt_xml, encoding="utf-8") as f:
+                    qpt_xml = f.read()
+            except OSError as e:
+                return error_response_json(
+                    ConfigError(
+                        f"Failed to read {qpt_xml}: {e}",
+                        details={"path": qpt_xml},
+                    )
+                )
+        report = verify_qpt(qpt_xml)
+        return json.dumps(report.to_dict(), indent=2, ensure_ascii=False)
+
+    @mcp.tool(
+        description=(
+            "Render a .qpt print layout to PDF, PNG, or SVG using QGIS. "
+            "QGIS is required (the tool returns E_QGIS_NOT_AVAILABLE in headless "
+            "mode unless a custom QgisProject is supplied). For PDFs the "
+            "rendering is vector (crisp at any zoom); for PNGs the resolution "
+            "is controlled by the ``dpi`` parameter."
+        )
+    )
+    async def export_layout(
+        qpt_path: str,
+        output_path: str,
+        format: str = "pdf",
+        dpi: int = 300,
+    ) -> str:
+        if not _HAS_QGIS:
+            return error_response_json(
+                QGISNotAvailableError(
+                    "export_layout requires QGIS. Use 'qpt' format and open the file in QGIS."
+                )
+            )
+        try:
+            from qgis.core import (
+                QgsApplication,
+                QgsLayoutExporter,
+                QgsPrintLayout,
+                QgsProject,
+            )
+            from qgis.PyQt.QtCore import QRectF
+        except ImportError as e:
+            return error_response_json(
+                QGISNotAvailableError(
+                    "QGIS Python bindings are incomplete.",
+                    details={"exception": str(e)},
+                )
+            )
+        project = QgsProject.instance()
+        layout = QgsPrintLayout(project)
+        # ``loadFromTemplate`` reads the .qpt XML; if the file is
+        # not on disk, the caller must have passed inline content.
+        if not layout.loadFromTemplate(qpt_path):
+            return error_response_json(
+                ConfigError(
+                    f"Failed to load .qpt from {qpt_path}",
+                    details={"path": qpt_path},
+                )
+            )
+        fmt = format.lower()
+        if fmt == "pdf":
+            exporter = QgsLayoutExporter(layout)
+            settings = QgsLayoutExporter.PdfExportSettings()
+            settings.dpi = dpi
+            result = exporter.exportToPdf(output_path, settings)
+            ok = result == QgsLayoutExporter.ExportResult.Success
+        elif fmt == "png":
+            exporter = QgsLayoutExporter(layout)
+            settings = QgsLayoutExporter.ImageExportSettings()
+            settings.dpi = dpi
+            page_rect = QRectF(
+                0,
+                0,
+                layout.pageCollection().page(0).pageSize().width(),
+                layout.pageCollection().page(0).pageSize().height(),
+            )
+            result = exporter.exportToImage(output_path, settings, page_rect)
+            ok = result == QgsLayoutExporter.ExportResult.Success
+        elif fmt == "svg":
+            exporter = QgsLayoutExporter(layout)
+            settings = QgsLayoutExporter.SvgExportSettings()
+            settings.dpi = dpi
+            result = exporter.exportToSvg(output_path, settings)
+            ok = result == QgsLayoutExporter.ExportResult.Success
+        else:
+            return error_response_json(
+                ConfigError(
+                    f"Unknown export format {format!r}. Use pdf, png, or svg.",
+                    details={"format": format},
+                )
+            )
+        if not ok:
+            return error_response_json(
+                ConfigError(
+                    f"Layout export failed with code {result}.",
+                    details={"path": output_path, "format": fmt, "code": int(result)},
+                )
+            )
+        return json.dumps(
+            {"status": "ok", "path": output_path, "format": fmt, "dpi": dpi},
+            indent=2,
+            ensure_ascii=False,
+        )
+
+    @mcp.tool(
+        description=(
+            "Generate per-layer-type default symbology (QML XML) for the "
+            "model's output layers. The LLM picks a renderer per layer "
+            "(single_symbol / categorized / graduated / rule_based); the "
+            "tool emits one .qml file per layer. Outputs are written to "
+            "``output_dir`` and named ``<step_id>.qml``. Returns a list of "
+            "{step_id, geometry_kind, renderer, path} entries."
+        )
+    )
+    async def generate_symbology(
+        model_json_str: str,
+        output_dir: str,
+        *,
+        default_renderer: str = "single_symbol",
+        classification_field: str | None = None,
+        classification_method: str = "equal",
+    ) -> str:
+        try:
+            from model_forge.compiler_core.core.services.map_builder.qml_builder import (
+                build_qml,
+            )
+        except ImportError as e:
+            return error_response_json(
+                ConfigError(
+                    "qml_builder is not available.",
+                    details={"exception": str(e)},
+                )
+            )
+        try:
+            model = _model_json_from_str(model_json_str)
+        except json.JSONDecodeError as e:
+            return error_response_json(
+                InvalidJSONError(
+                    f"Invalid model JSON: {e}",
+                    details={"line": e.lineno, "column": e.colno},
+                )
+            )
+
+        import os
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Determine geometry kind per step from the upstream
+        # model_input fields, or default to polygon.
+        layer_results: list[dict[str, Any]] = []
+        for alg in model.get("algorithms", []):
+            step_id = str(alg.get("id", "") or "")
+            if not step_id:
+                continue
+            kind = _guess_geometry_kind(alg)
+            try:
+                qml = build_qml(
+                    geometry_kind=kind,
+                    layer_name=step_id,
+                    renderer=default_renderer,
+                    field_name=classification_field,
+                    classes=5,
+                    classification_mode=classification_method,
+                )
+            except Exception as e:  # noqa: BLE001
+                layer_results.append({"step_id": step_id, "error": f"qml_builder failed: {e}"})
+                continue
+            out_path = os.path.join(output_dir, f"{step_id}.qml")
+            try:
+                with open(out_path, "w", encoding="utf-8") as f:
+                    f.write(qml)
+            except OSError as e:
+                layer_results.append({"step_id": step_id, "error": f"write failed: {e}"})
+                continue
+            layer_results.append(
+                {
+                    "step_id": step_id,
+                    "geometry_kind": kind,
+                    "renderer": default_renderer,
+                    "path": out_path,
+                    "bytes_written": len(qml.encode("utf-8")),
+                }
+            )
+        return json.dumps(
+            {
+                "status": "ok",
+                "output_dir": output_dir,
+                "layers": layer_results,
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+
+    @mcp.tool(
+        description=(
+            "Run a model JSON in a QGIS environment. Requires QGIS Python "
+            "(no GUI needed) - the runner calls ``processing.run()`` for "
+            "each step in topological order and threads outputs to inputs. "
+            "``fail_fast=True`` (default) aborts on the first failure; "
+            "``fail_fast=False`` continues and reports per-step status. "
+            "``max_retries`` retries each step on failure with exponential "
+            "backoff. Returns a per-step execution report with timings, "
+            "status, inputs, and outputs."
+        )
+    )
+    async def execute_model(
+        model_json_str: str,
+        fail_fast: bool = True,
+        max_retries: int = 0,
+    ) -> str:
+        try:
+            from model_forge.compiler_core.core.services.model_runner import (
+                run_model,
+            )
+        except ImportError as e:
+            return error_response_json(
+                ConfigError(
+                    "model_runner is not available.",
+                    details={"exception": str(e)},
+                )
+            )
+        try:
+            model = _model_json_from_str(model_json_str)
+        except json.JSONDecodeError as e:
+            return error_response_json(
+                InvalidJSONError(
+                    f"Invalid model JSON: {e}",
+                    details={"line": e.lineno, "column": e.colno},
+                )
+            )
+        try:
+            report = run_model(
+                model,
+                fail_fast=fail_fast,
+                max_retries=max_retries,
+            )
+        except Exception as e:  # noqa: BLE001
+            return error_response_json(
+                ConfigError(
+                    f"Model run failed: {e}",
+                    details={"exception_type": type(e).__name__},
+                )
+            )
+        return json.dumps(report.to_dict(), indent=2, ensure_ascii=False)
+
+
+# --- Tool: Server Management --------------------------------------------
 
 
 def _register_management_tools(mcp: FastMCP) -> None:
@@ -1700,8 +2100,8 @@ def _register_management_tools(mcp: FastMCP) -> None:
             "Configure the LLM backend for model generation. Required before calling "
             "generate_model. Supports 'ollama' (default, http://localhost:11434), "
             "'openai' (OpenAI Chat Completions), 'openai_compat' (any OpenAI-compatible "
-            "endpoint such as vLLM, LM Studio, OpenRouter — set base_url), "
-            "'azure_openai' (Azure-hosted OpenAI deployments — model field is the "
+            "endpoint such as vLLM, LM Studio, OpenRouter - set base_url), "
+            "'azure_openai' (Azure-hosted OpenAI deployments - model field is the "
             "deployment name, base_url is the resource endpoint), 'anthropic' "
             "(Anthropic Messages API, e.g. claude-3-5-sonnet), and 'gemini' "
             "(Google Gemini generateContent API). "
@@ -1804,7 +2204,7 @@ def _register_management_tools(mcp: FastMCP) -> None:
         )
 
 
-# ─── Server creation ────────────────────────────────────────────────────
+# --- Server creation ----------------------------------------------------
 
 
 # Single source of truth for the tool list. The ``server-info`` resource
@@ -1826,6 +2226,11 @@ TOOL_REGISTRY: tuple[str, ...] = (
     "validate_model",
     "export_model",
     "summarize_model",
+    "generate_print_layout",
+    "verify_layout",
+    "export_layout",
+    "generate_symbology",
+    "execute_model",
     "set_llm_config",
     "get_server_info",
     "cancel_generation",
@@ -1847,13 +2252,19 @@ def create_server(state: ServerState | None = None) -> FastMCP:
 
     mcp = FastMCP(
         "Model Forge",
-        description="QGIS Processing model generation via the Model Forge compiler pipeline.",
-        version=__version__,
+        instructions=(
+            "QGIS Processing model generation via the Model Forge "
+            "compiler pipeline. Tools are chained: list_layers → "
+            "list_algorithms → get_algorithm_info → generate_model → "
+            "export_model, and for layout: generate_symbology → "
+            "generate_print_layout → verify_layout → export_layout."
+        ),
     )
 
     _register_context_tools(mcp)
     _register_algorithm_tools(mcp)
     _register_generation_tools(mcp)
+    _register_map_tools(mcp)
     _register_management_tools(mcp)
 
     try:
@@ -1911,7 +2322,7 @@ def create_server(state: ServerState | None = None) -> FastMCP:
     return mcp
 
 
-# ─── Start/stop ─────────────────────────────────────────────────────────
+# --- Start/stop ---------------------------------------------------------
 
 
 def start_server(
@@ -2069,14 +2480,14 @@ def _wrap_with_token_auth(app: Any, expected_token: str) -> Any:
     All requests must carry either ``Authorization: Bearer <token>``
     or ``X-Model-Forge-Token: <token>``. The path ``/healthz`` is
     always allowed (used by orchestrators for liveness probes).
-    Falls back to a no-op wrap if Starlette isn't importable — the
+    Falls back to a no-op wrap if Starlette isn't importable - the
     SSE transport still works, just without auth.
     """
     try:
         from starlette.middleware.base import BaseHTTPMiddleware
         from starlette.responses import JSONResponse
     except ImportError:
-        log.warning("starlette not available — token auth not enforced")
+        log.warning("starlette not available - token auth not enforced")
         return app
 
     expected = str(expected_token)
@@ -2111,7 +2522,7 @@ def is_running() -> bool:
     return _server_instance is not None
 
 
-# ─── CLI entry point ────────────────────────────────────────────────────
+# --- CLI entry point ----------------------------------------------------
 
 
 def main():
@@ -2226,7 +2637,7 @@ def main():
     llm_config = cfg.to_dict()
 
     if not _HAS_QGIS:
-        log.warning("QGIS not available — context tools will return empty results.")
+        log.warning("QGIS not available - context tools will return empty results.")
 
     if args.transport == "stdio":
         mcp = start_server(transport="stdio", llm_config=llm_config)

@@ -231,16 +231,30 @@ model-forge --llm-provider ollama --llm-model qwen2.5-coder:7b
 
 Equivalent env vars (lowest priority): `MODELFORGE_PROVIDER`, `MODELFORGE_MODEL`, `MODELFORGE_BASE_URL`, `MODELFORGE_API_KEY`, `MODELFORGE_TEMPERATURE`, `MODELFORGE_TIMEOUT`, `MODELFORGE_DEFAULT_HEADERS` (JSON object), `MODELFORGE_EXTRA_BODY` (JSON object). `MODELFORGE_REQUIRE_KEY=0` skips the API key check for self-hosted deployments.
 
-### Tool catalog (23 tools)
+### Tool catalog (28 tools)
 
 | Category | Tool | Purpose |
 | --- | --- | --- |
 | Context | `list_layers`, `get_layer_info`, `get_project_info`, `refresh_qgis_context`, `configure_headless_context` | QGIS project state, plus headless context override |
 | Algorithms | `list_algorithms`, `get_algorithm_info`, `list_providers`, `list_algorithm_groups`, `load_catalog_from_file`, `export_catalog` | Algorithm discovery + headless catalog I/O |
 | Generation | `generate_model`, `validate_model`, `export_model`, `summarize_model` | The main pipeline + validation + 8 export formats (`json` / `mermaid` / `script` / `model3` / `geojson` / `gpkg` / `runnable_script` / `processing_runnable_json`) |
+| Map building | `generate_print_layout`, `verify_layout`, `export_layout`, `generate_symbology`, `execute_model` | Auto-build a print layout (.qpt), per-layer QML symbology, run a model in headless QGIS, render to PDF/PNG/SVG |
 | Management | `set_llm_config`, `get_server_info`, `ping`, `cancel_generation`, `get_generation_status`, `subscription_status`, `subscribe_resource`, `unsubscribe_resource` | Server control, job lifecycle, resource subscription |
 
-Plus 3 outer prompts: `generate_model_from_intent`, `explain_model`, `convert_script_to_model`.
+Plus 6 outer prompts: `generate_model_from_intent`, `explain_model`, `convert_script_to_model`, `generate_complete_map_from_intent`, `generate_print_layout_from_model`, `generate_symbology_from_model`.
+
+### Map building: layout, symbology, execution
+
+The `generate_*` and `execute_model` tools close the model→map loop. The flow is:
+
+1. **`generate_model`** — produce the model JSON (the same as the other tools).
+2. **`generate_symbology`** — emit one `.qml` file per output layer. The LLM picks the renderer (`single_symbol` / `categorized` / `graduated` / `rule_based`); the builder applies sensible defaults per geometry type.
+3. **`generate_print_layout`** — emit a `.qpt` print layout template. Templates: `default` (A4 portrait, full-bleed), `scientific` (Letter portrait, metadata block), `presentation` (16:9 landscape), `minimal` (legend-less, scale-bar only).
+4. **`verify_layout`** — run the ruleset against the .qpt (title within margins, scale bar ≥ 15mm, legend within map footprint, metadata block in scientific, no critical overlaps). Returns a list of stable violation codes (`E_TITLE_OUT_OF_MARGINS`, `E_LEGEND_OUTSIDE_MAP`, `E_NO_METADATA`, etc.) the LLM uses as constraints in a re-try loop (max 2 retries).
+5. **`export_layout`** — render the .qpt to PDF / PNG / SVG via `QgsLayoutExporter` (QGIS-required).
+6. **`execute_model`** — run a model JSON in headless QGIS via `processing.run()`. Topological execution with retries, per-step timing, and cancellation. Pure-Python on top of QGIS's `processing` module; no GUI needed.
+
+The chained prompt `generate_complete_map_from_intent` orchestrates the whole flow: `generate_model` → `generate_symbology` → `generate_print_layout` → `verify_layout` (re-try on violations) → `export_layout`. This is the v3 "one-shot demo" — describe a workflow, get a model + a printable PDF.
 
 ### Resources (3)
 

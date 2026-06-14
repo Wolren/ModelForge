@@ -13,8 +13,9 @@
 /model_forge.egg-info/
 
 # ─── Runtime data / caches ───────────────────────────────────────────
-.symbology-style.db
-symbology-style.db
+# Catch-all for any SQLite / spatialite databases that
+# QGIS may create in the repo root during testing.
+*.db
 /model_forge/resources/
 /model_forge/resources/*
 
@@ -49,3 +50,12 @@ env/
 # ─── Top-level ad-hoc scripts (move into tests/ before committing) ─
 /test_*.py
 /check_*.py
+
+# ─── Generated samples (regenerate each run) ──────────────────────
+/samples/
+/_check_load.py
+/gallery/
+/archive/
+
+# ─── Runtime layout / symbology artifacts ─────────────────────────
+.model_forge/

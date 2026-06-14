@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-# ─── generate_model_from_intent ─────────────────────────────────────────
+# --- generate_model_from_intent -----------------------------------------
 
 _GENERATE_MODEL_FROM_INTENT = """\
 You are a QGIS Processing model designer. Translate the user's
@@ -100,12 +100,12 @@ You are converting a standalone QGIS Processing Python script
 ## Workflow
 
 1. Read the script. Identify:
-   - Each call to ``processing.run(...)`` — that's a step.
-   - The arguments to each call — those become parameter bindings.
-   - Outputs that are passed as inputs to subsequent calls — those
+   - Each call to ``processing.run(...)`` - that's a step.
+   - The arguments to each call - those become parameter bindings.
+   - Outputs that are passed as inputs to subsequent calls - those
      are ``child_output`` links in the model.
    - Inputs the user provides (vector/raster/number/string/boolean)
-     — those are ``model_input`` entries.
+     - those are ``model_input`` entries.
 2. Call `list_algorithms` to confirm the algorithm IDs and exact
    parameter / output names. Scripts often use friendly names or
    omit prefixes; the catalog is the source of truth.
@@ -115,9 +115,9 @@ You are converting a standalone QGIS Processing Python script
    etc.).
 4. Build a `model_json` dict with the structure:
    - ``model_name``, ``model_group``
-   - ``inputs`` — one entry per script parameter that came from the
+   - ``inputs`` - one entry per script parameter that came from the
      user (a layer, a number, etc.).
-   - ``algorithms`` — one entry per script algorithm call:
+   - ``algorithms`` - one entry per script algorithm call:
      - ``id``: snake_case step id
      - ``algorithm_id``: from `get_algorithm_info`
      - ``parameters``: each script argument, with ``type`` set to
@@ -137,7 +137,7 @@ You are converting a standalone QGIS Processing Python script
 """
 
 
-# ─── Public registration ───────────────────────────────────────────────
+# --- Public registration -----------------------------------------------
 
 
 def register_prompts(mcp: Any) -> None:
@@ -167,7 +167,7 @@ def register_prompts(mcp: Any) -> None:
                     "type": "text",
                     "text": (
                         f"User intent:\n\n{intent}\n\n"
-                        "Begin by calling list_layers and list_project_info "
+                        "Begin by calling list_layers and get_project_info "
                         "to see the project's actual layers, CRS, and fields."
                     ),
                 },
@@ -236,11 +236,115 @@ def register_prompts(mcp: Any) -> None:
             },
         ]
 
+    @mcp.prompt(
+        name="generate_complete_map_from_intent",
+        description=(
+            "Prime the model to take a user's plain-language request and "
+            "produce a complete map deliverable: a QGIS Processing model, "
+            "a print layout template, and per-layer symbology. The workflow "
+            "is chained and re-uses MCP tools: generate_model → "
+            "generate_symbology → generate_print_layout → verify_layout "
+            "→ (re-emit on violations) → export_layout."
+        ),
+    )
+    def _generate_complete_map_from_intent(intent: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "role": "user",
+                "content": {
+                    "type": "text",
+                    "text": (
+                        "You are a GIS cartographer. The user wants a complete map "
+                        "deliverable from this intent:\n\n"
+                        f"{intent}\n\n"
+                        "Chain the tools in this order:\n"
+                        "1. ``generate_model`` (model JSON)\n"
+                        "2. ``generate_symbology`` (per-layer .qml files)\n"
+                        "3. ``generate_print_layout`` (a .qpt template)\n"
+                        "4. ``verify_layout`` (run the ruleset; if violations, "
+                        "revise the parameters and call ``generate_print_layout`` "
+                        "again - max 2 retries)\n"
+                        "5. ``export_layout`` (render to PDF)\n\n"
+                        "Pass the project CRS to the layout tool so the "
+                        "scientific template can include it in the metadata "
+                        "block. Pick a template based on the intent: "
+                        "'scientific' for academic, 'presentation' for "
+                        "client-facing, 'default' for internal, 'minimal' "
+                        "when the user wants a one-image map."
+                    ),
+                },
+            },
+        ]
+
+    @mcp.prompt(
+        name="generate_print_layout_from_model",
+        description=(
+            "Prime the model to design a QGIS print layout template "
+            "(.qpt) for an existing model JSON. The LLM writes "
+            "title/subtitle text; the layout builder does geometry. "
+            "The verifier checks structural correctness; the LLM "
+            "adjusts parameters and re-emits if the ruleset reports "
+            "violations."
+        ),
+    )
+    def _generate_print_layout_from_model(model_json: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "role": "user",
+                "content": {
+                    "type": "text",
+                    "text": (
+                        "You are designing a print layout. Read the model JSON, "
+                        "infer the project's intent from the layer names, and "
+                        "call ``generate_print_layout`` with appropriate "
+                        "title, subtitle, and template. Then call "
+                        "``verify_layout`` and, if it reports violations, "
+                        "revise the parameters and call ``generate_print_layout`` "
+                        "again. Max 2 retries. The user can re-run this prompt "
+                        "later to adjust.\n\n"
+                        f"Model JSON:\n\n```json\n{model_json}```\n"
+                    ),
+                },
+            },
+        ]
+
+    @mcp.prompt(
+        name="generate_symbology_from_model",
+        description=(
+            "Prime the model to design per-layer QML symbology for a "
+            "model JSON. The LLM picks renderers and field choices "
+            "based on layer geometry and intent; the QML builder "
+            "emits the .qml files."
+        ),
+    )
+    def _generate_symbology_from_model(model_json: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "role": "user",
+                "content": {
+                    "type": "text",
+                    "text": (
+                        "You are designing per-layer symbology. Read the model "
+                        "JSON and call ``generate_symbology`` with a sensible "
+                        "default renderer (single_symbol for point/line, "
+                        "graduated for numeric fields, categorized for "
+                        "categorical fields). For outputs that are clearly "
+                        "intermediate (e.g. a temporary buffer), keep the "
+                        "symbology simple.\n\n"
+                        f"Model JSON:\n\n```json\n{model_json}\n```\n"
+                    ),
+                },
+            },
+        ]
+
 
 PROMPT_REGISTRY: tuple[str, ...] = (
     "generate_model_from_intent",
     "explain_model",
     "convert_script_to_model",
+    "generate_complete_map_from_intent",
+    "generate_print_layout_from_model",
+    "generate_symbology_from_model",
 )
 
 __all__ = ["PROMPT_REGISTRY", "register_prompts"]

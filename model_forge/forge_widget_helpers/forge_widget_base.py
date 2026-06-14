@@ -170,6 +170,19 @@ class ForgeWidget(QWidget):
         self.current_model = None
         self.current_context_text = ""
         self._designer_dlg = None
+        # Auto-test the LLM connection on init so the dock
+        # shows "connected" or "not reachable" without the
+        # user having to click "Test Connection" first. The
+        # backend's defaults are Ollama at localhost:11434.
+        # If the user has saved settings, those are loaded
+        # by ``_load_compiler_settings``; this probe just
+        # tries the configured endpoint and reports.
+        try:
+            from qgis.PyQt.QtCore import QTimer
+
+            QTimer.singleShot(500, self._auto_probe_llm)
+        except Exception:  # noqa: BLE001
+            pass
         self.worker = None
 
         self._init_ui()
@@ -619,13 +632,55 @@ class ForgeWidget(QWidget):
     def _on_test_connection(self):
         self._apply_settings()
         if self.backend.test_connection():
+            self._set_llm_status(
+                f"✓ Connected: {self.backend.backend} @ {self.backend.url}",
+                ok=True,
+            )
             QMessageBox.information(
                 self, "Connection OK", "Successfully connected to the LLM backend."
             )
         else:
+            self._set_llm_status(
+                f"✗ Not reachable: {self.backend.backend} @ {self.backend.url}",
+                ok=False,
+            )
             QMessageBox.warning(
                 self, "Connection Failed", "Could not connect. Check URL and API key."
             )
+
+    def _auto_probe_llm(self) -> None:
+        """Run on init: try the saved LLM endpoint once.
+
+        Updates the status label so the user immediately
+        sees "connected" or "not reachable" without having
+        to click Test Connection. Runs after a 500 ms
+        delay so the QSettings save/load is settled.
+        """
+        try:
+            ok = self.backend.test_connection()
+        except Exception:  # noqa: BLE001
+            ok = False
+        if ok:
+            self._set_llm_status(
+                f"✓ Connected: {self.backend.backend} @ {self.backend.url}",
+                ok=True,
+            )
+        else:
+            self._set_llm_status(
+                f"○ LLM not reachable ({self.backend.backend} @ {self.backend.url}). "
+                f"Settings → Test Connection to retry.",
+                ok=False,
+            )
+
+    def _set_llm_status(self, text: str, ok: bool) -> None:
+        """Update the status label with the LLM connection state."""
+        if not hasattr(self, "status_label") or self.status_label is None:
+            return
+        self.status_label.setText(text)
+        if ok:
+            self.status_label.setStyleSheet("color: #2c7a2c; font-weight: bold;")
+        else:
+            self.status_label.setStyleSheet("color: #b06a00; font-style: italic;")
 
     def _apply_settings(self):
         key = self.cmb_backend.itemData(self.cmb_backend.currentIndex())
