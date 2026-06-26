@@ -12,8 +12,6 @@
 
 > **EXPERIMENTAL** — This plugin is a work in progress. APIs, features, and UI may change without notice. External links and documentation may become outdated or broken.
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)[![QGIS](https://img.shields.io/badge/QGIS-4.0+-green)](https://www.qgis.org/)[![Qt](https://img.shields.io/badge/Qt-6.x-green)](https://www.qt.io/)
-
 ## What is Model Forge?
 
 Model Forge is a QGIS plugin that generates editable geoprocessing models from plain-language descriptions. It bridges AI language models with QGIS Processing Framework, transforming natural language workflow descriptions into visual models ready for editing, refinement, and execution.
