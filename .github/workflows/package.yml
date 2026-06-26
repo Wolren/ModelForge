@@ -1,19 +1,9 @@
+---
 name: Package plugin
 
-on:
-  push:
-    branches: [master]
-  workflow_dispatch:
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
-jobs:
-  package:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
+mopermissions:
+  contents: write
+steps:
       - uses: actions/checkout@v4
         with:
           fetch-tags: true
@@ -43,7 +33,7 @@ jobs:
         shell: pwsh
         run: |
           $tag = "v${{ steps.metadata.outputs.version }}"
-          $existing = git tag -l "$tag"
+          $existing = git ls-remote --tags origin "refs/tags/$tag" 2>$null
           if (-not $existing) {
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -57,7 +47,7 @@ jobs:
       - name: Create release
         if: steps.tag.outputs.created == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${!{ github.token }}
         run: |
           gh release create "v${{ steps.metadata.outputs.version }}" \
             --title "Model Forge v${{ steps.metadata.outputs.version }}" \
