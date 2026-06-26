@@ -4,7 +4,7 @@ name: Package plugin
 mopermissions:
   contents: write
 steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.0
         with:
           fetch-tags: true
 
@@ -23,7 +23,7 @@ steps:
           Compress-Archive -Path * -DestinationPath ../model_forge.zip -Force
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: model_forge
           path: model_forge.zip
