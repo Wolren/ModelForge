@@ -6,7 +6,9 @@
 [![QGIS 3.22+](https://img.shields.io/badge/QGIS-3.22+-green)](https://qgis.org)
 [![Qt](https://img.shields.io/badge/Qt-5.x_|_6.x-green)](https://www.qt.io/)
 
-# Model Forge ![Model Forge banner](model_forge/icon.png)
+# Model Forge
+
+![Model Forge banner](model_forge/icon.png)
 
 > **EXPERIMENTAL** - This plugin is a work in progress. APIs, features, and UI may change without notice. External links and documentation may become outdated or broken.
 
