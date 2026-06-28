@@ -35,8 +35,17 @@ def test_layout_design_prompt_mentions_required_keys():
     """
     for needle in ("title", "subtitle", "template", "layer_ids", "style_hints"):
         assert needle in SYSTEM_PROMPT_LAYOUT_DESIGN, f"layout-design prompt missing {needle!r}"
-    # The four template choices must all be named.
-    for tpl in ("default", "scientific", "presentation", "minimal"):
+    # The eight template choices must all be named.
+    for tpl in (
+        "default",
+        "scientific",
+        "presentation",
+        "minimal",
+        "screen_fullhd",
+        "instagram_square",
+        "index_a4",
+        "drawing_a1",
+    ):
         assert tpl in SYSTEM_PROMPT_LAYOUT_DESIGN
 
 

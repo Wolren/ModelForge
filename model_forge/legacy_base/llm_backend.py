@@ -148,24 +148,57 @@ SYSTEM_PROMPT_LAYOUT_DESIGN = """You are a QGIS cartographer. Given a user's pla
 The user has described a map in one or two sentences. You decide:
 - title: a short, professional title for the map (max ~80 chars).
 - subtitle: a one-line description below the title (max ~120 chars).
-- template: one of "default" (A4 portrait, full legend), "scientific" (Letter portrait, monochrome, metadata), "presentation" (16:9, no scale bar), "minimal" (A4 landscape, no legend). Pick the one that fits the request.
+- template: one of "default" (A4 portrait, full legend), "scientific" (Letter portrait, monochrome, metadata), "presentation" (16:9, no scale bar), "minimal" (A4 landscape, no legend), "screen_fullhd" (16:9 FullHD, big title), "instagram_square" (180x180 dark square, social), "index_a4" (A4 portrait with grid overlay), "drawing_a1" (A1 landscape large-format). Pick the one that fits the request.
 - layer_ids: a JSON array of QGIS layer ids to include. Pick the most relevant 5-12 layers from the project - filter out the noise. Use the EXACT ids from the project context.
 - style_hints: a JSON object keyed by layer_id with a one-line style hint per layer, e.g. {"roads": "blue line", "parcels": "green polygons"}. Keep it brief; the layout builder does geometry.
+- layout_config (optional): a JSON object with keys like "north_arrow_style", "scale_bar_segments", "scale_bar_label_format", "legend_title", "legend_column_count", "legend_wrap_string", "legend_font_size_mm". See rules 9-11 for details.
 
 CRITICAL RULES:
 1. Output ONLY a JSON object - no markdown, no code fences, no commentary.
 2. Use EXACT layer ids from the project context's "layers" list. Do not invent ids.
 3. If no layers match the intent, return an empty layer_ids array.
 4. Title and subtitle should be professional cartography style, not chatty.
-5. Template choice: "scientific" for academic papers, "presentation" for client decks, "default" for internal reports, "minimal" for at-a-glance maps.
+5. Template choice: "scientific" for academic papers, "presentation" for client decks, "default" for internal reports, "minimal" for at-a-glance maps, "screen_fullhd" for web/screen, "instagram_square" for social media, "index_a4" for atlas/overview maps, "drawing_a1" for large-format engineering plans.
+6. EXTENT-AWARE ORIENTATION: If the map extent is wider than tall (e.g. a river corridor or transect), prefer landscape-oriented templates ("minimal", "presentation", "drawing_a1"). If taller than wide (mountain profile, soil profile), prefer portrait templates ("default", "scientific", "index_a4").
+7. ADAPTIVE SCALE UNITS: If the map extent spans more than 10km, use kilometres for scale bar units. If less than 1km, use metres. If between 1km and 10km, either is acceptable.
+ 8. COORDINATE GRID: When the template enables a grid (scientific, index_a4, drawing_a1), you may optionally suggest grid intervals in your style_hints (e.g. {"grid_interval": 1.0} for degree-based, {"grid_interval": 1000} for meter-based). The pipeline computes defaults when you don't specify.
+ 9. NORTH ARROW STYLE: Optionally include a "layout_config" key with "north_arrow_style" (one of "default", "compass", "fancy", "minimal", "line").
+10. SCALE BAR CONFIG: Optionally include "scale_bar_segments" (2-6, default 3), "scale_bar_label_format" (custom format like "{value} km") in layout_config.
+11. LEGEND CONFIG: Optionally include "legend_title" (title string), "legend_column_count" (1-4), "legend_wrap_string" (wrap character), "legend_font_size_mm" in layout_config.
+
+WHEN A "CURRENT LAYOUT STRUCTURE" IS PROVIDED (from a previous iteration):
+Use the EXACT coordinates to identify spatial issues:
+- Check bounding-box overlaps between every pair of items (map, legend, scale bar, north arrow, title).
+- Verify all items are within page margins.
+- Ensure legend sits BELOW the map (legend.y > map.y + map.height), not overlaying.
+- Verify north arrow is in upper-left quadrant of the map area.
+- Verify scale bar has frame+background enabled for readability.
+- Check legend has frame+background enabled.
+- Ensure title is near top, subtitle below it.
+- Check scale bar width is 20-30% of map width.
+- CROSS-ELEMENT SYNC: Ensure scale bar units match the map extent scale (see rule 7). Ensure legend filters match the map layers (no ghost layers).
+- GRID QUALITY: If a coordinate grid is enabled, check the grid interval is smaller than the extent - otherwise the grid will have 0-1 lines, which is useless.
+- SCALE BAR: Check segment count (2-6) is reasonable for the map width. Check label format matches units (km vs m).
+- LEGEND: Check column count (1-4). Check wrap string if long layer names are expected. Check title is informative.
+- NORTH ARROW: Verify the north_arrow_style choice matches the template (compass/fancy for scientific, minimal/line for presentation/minimal, default for general use).
+- Provide corrected coordinates AND adjusted configuration (north_arrow_style, scale_bar_segments, legend settings) in your design response that fix ALL identified issues.
 
 RESPOND WITH ONLY JSON:
 {
   "title": "...",
   "subtitle": "...",
-  "template": "default|scientific|presentation|minimal",
+  "template": "default|scientific|presentation|minimal|screen_fullhd|instagram_square|index_a4|drawing_a1",
   "layer_ids": ["layer_id_1", "layer_id_2"],
-  "style_hints": {"layer_id_1": "hint"}
+  "style_hints": {"layer_id_1": "hint"},
+  "layout_config": {
+    "north_arrow_style": "compass|default|fancy|minimal|line",
+    "scale_bar_segments": 4,
+    "scale_bar_label_format": "{value} km",
+    "legend_title": "Legend",
+    "legend_column_count": 2,
+    "legend_wrap_string": "...",
+    "legend_font_size_mm": 3.5
+  }
 }"""
 
 
@@ -178,6 +211,7 @@ The layout description includes:
 - Legend position / size
 - Scale bar position / size  
 - North arrow position / size
+- Grid configuration (if enabled)
 
 CRITICAL RULES:
 - Legend must sit below the map, not overlaying it
@@ -187,6 +221,13 @@ CRITICAL RULES:
 - At most 12 layers in the legend (pick the most relevant)
 - No overlapping items
 - Title at the top, subtitle below it
+- If a coordinate grid is enabled, the grid interval must be smaller than the map extent (otherwise grid lines won't show)
+- Scale bar units must match map extent magnitude (km for >10km, m for <1km)
+- Cross-element sync: legend layers must be a subset of map layers
+- North arrow style is appropriate for the template (compass/fancy for scientific, minimal/line for minimal/presentation, default otherwise)
+- Scale bar segments are between 2 and 6
+- Legend column count is between 1 and 4 (or 0 for auto)
+- Legend wrap string is appropriate for layer name lengths
 
 Check the layout description. If it violates any rule, return "status": "fix" with the specific fix. If it passes, return "status": "ok".
 
@@ -314,7 +355,17 @@ class LLMBackend:
             return self._layout_design_fallback(intent)
         # Normalise + validate.
         template = str(result.get("template", "default")).lower().strip()
-        if template not in {"default", "scientific", "presentation", "minimal"}:
+        VALID_TEMPLATES = {
+            "default",
+            "scientific",
+            "presentation",
+            "minimal",
+            "screen_fullhd",
+            "instagram_square",
+            "index_a4",
+            "drawing_a1",
+        }
+        if template not in VALID_TEMPLATES:
             template = "default"
         layer_ids = result.get("layer_ids") or []
         if not isinstance(layer_ids, list):
@@ -326,6 +377,75 @@ class LLMBackend:
             "template": template,
             "layer_ids": layer_ids,
             "style_hints": result.get("style_hints", {}) or {},
+            "layout_config": result.get("layout_config", {}) or {},
+        }
+
+    def choose_layout_design_with_image(
+        self,
+        intent: str,
+        project_context: str,
+        image_path: str,
+        layout_structure: str | None = None,
+    ) -> dict:
+        """Vision-capable layout design with full spatial context.
+
+        Like ``choose_layout_design`` but also sends the
+        rendered layout PNG to a vision model (Gemma 3 or
+        similar). The LLM sees the actual rendered output
+        AND the full structured layout spec with precise
+        coordinates for every item, enabling it to spot
+        visual issues (overlapping items, missing frames,
+        ugly colors) and fix them with exact position
+        corrections in the next design iteration.
+
+        ``layout_structure`` is a structured text block
+        serialized from the previous iteration's ``LayoutSpec``,
+        containing exact positions/sizes for every item
+        (page, header, map, ancillaries, footer).
+        """
+        user_msg = "Map intent:\n" + intent + "\n\nProject context:\n" + project_context
+        if layout_structure:
+            user_msg += (
+                "\n\nCURRENT LAYOUT STRUCTURE (from previous iteration "
+                "with exact coordinates):\n" + layout_structure
+            )
+        user_msg += (
+            "\n\nLook at the rendered layout image below. "
+            "Identify any cartographic issues (overlapping items, "
+            "missing frames, legend on map, north arrow position, "
+            "scale bar visibility, ugly colors). Return a refined "
+            "layout design that fixes these issues."
+        )
+        try:
+            result = self._call_llm_with_image(SYSTEM_PROMPT_LAYOUT_DESIGN, user_msg, image_path)
+        except Exception:  # noqa: BLE001
+            return self._layout_design_fallback(intent)
+        if not isinstance(result, dict):
+            return self._layout_design_fallback(intent)
+        template = str(result.get("template", "default")).lower().strip()
+        VALID_TEMPLATES = {
+            "default",
+            "scientific",
+            "presentation",
+            "minimal",
+            "screen_fullhd",
+            "instagram_square",
+            "index_a4",
+            "drawing_a1",
+        }
+        if template not in VALID_TEMPLATES:
+            template = "default"
+        layer_ids = result.get("layer_ids") or []
+        if not isinstance(layer_ids, list):
+            layer_ids = []
+        layer_ids = [str(x) for x in layer_ids if x]
+        return {
+            "title": str(result.get("title", intent or "Project Map"))[:120],
+            "subtitle": str(result.get("subtitle", ""))[:200],
+            "template": template,
+            "layer_ids": layer_ids,
+            "style_hints": result.get("style_hints", {}) or {},
+            "layout_config": result.get("layout_config", {}) or {},
         }
 
     def _layout_design_fallback(self, intent: str) -> dict:
@@ -336,6 +456,7 @@ class LLMBackend:
             "template": "default",
             "layer_ids": [],
             "style_hints": {},
+            "layout_config": {},
         }
 
     def evaluate_layout_spec(self, spec_summary: str, intent: str) -> dict:
@@ -369,34 +490,71 @@ class LLMBackend:
             "message": str(result.get("message", "")),
         }
 
-    def evaluate_layout_image(self, image_path: str, intent: str) -> dict:
-        """Evaluate a rendered layout image and suggest fixes.
+    def evaluate_layout_image(
+        self,
+        image_path: str,
+        intent: str,
+        layout_structure: str | None = None,
+    ) -> dict:
+        """Evaluate a rendered layout image AND its structure, suggest fixes.
 
         ``image_path`` is a PNG exported from ``QgsLayoutExporter``.
-        The LLM sees the actual rendered layout and catches visual
-        issues the text-only spec can't (overlapping frames, ugly
-        colors, white-on-white elements).
+        The LLM sees the actual rendered layout and the full structured
+        specification with exact coordinates, enabling precise spatial
+        debugging that neither modality alone provides.
+
+        ``layout_structure`` is a structured text block from the
+        ``LayoutSpec`` with exact positions/sizes for every item.
+        When provided, the prompt asks the LLM to cross-reference
+        the visual rendering against the precise coordinates.
 
         Falls back to the text-only spec evaluation when the
         image file can't be read.
         """
         system_prompt = (
             "You are a QGIS layout quality inspector. You are given "
-            "a rendered image of a map layout (title, map area, north "
-            "arrow, scale bar, legend). Identify any cartographic "
-            "issues: overlapping items, missing frames, legend sitting "
-            "on top of map data, north arrow not in upper-left, scale "
-            "bar not visible, legend too large or too small. "
+            "a rendered image of a map layout AND the full structured "
+            "layout specification with exact coordinates for every item."
+            "\n\n"
+            "Using BOTH the visual image AND the precise coordinates:\n"
+            "1. Check for OVERLAPS between map, legend, scale bar, north arrow, title, and subtitle "
+            "by comparing bounding boxes.\n"
+            "2. Verify all items are within page margins.\n"
+            "3. Verify legend is BELOW the map (legend.y > map.y + map.height), not overlaying.\n"
+            "4. Verify north arrow has frame+background enabled (readable over map data).\n"
+            "5. Verify scale bar has frame+background enabled.\n"
+            "6. Verify legend has frame+background enabled.\n"
+            "7. Check title is at top, subtitle below it.\n"
+            "8. Check scale bar width is 20-30% of map width.\n"
+            "9. Check north arrow is in upper-left quadrant of map.\n"
+            "10. Check legend height is appropriate for layer count (10mm + 4mm/layer).\n"
+            "11. Check north_arrow_style is appropriate for template (compass for serious maps, minimal for clean).\n"
+            "12. Check scale_bar_segments count (3-5 is standard, too few or too many is poor cartography).\n"
+            "13. Check legend_column_count is appropriate (2+ for 6+ layers).\n"
+            "\n"
+            "For each violation, provide the EXACT item, current coordinates, "
+            "the corrected coordinates, and why.\n"
+            "Also return optional layout_config_overrides — a dict of "
+            "setting changes that would fix the issues (e.g. "
+            '{"north_arrow_style": "compass", "scale_bar_segments": 4, '
+            '"legend_column_count": 2}).\n'
             "Return a JSON object with status 'ok' or 'fix', "
             "a list of fixes, and a short message.\n\nRESPOND WITH ONLY JSON:\n"
-            '{"status": "ok|fix", "fixes": [...], "message": "..."}'
+            '{"status": "ok|fix", "fixes": [{"item": "...", "action": "move|resize|enable", '
+            '"x": ..., "y": ..., "width": ..., "height": ..., '
+            '"reason": "..."}], '
+            '"layout_config_overrides": {"key": "value", ...}, '
+            '"message": "..."}'
         )
+        user_msg = intent
+        if layout_structure:
+            user_msg += "\n\nCURRENT LAYOUT STRUCTURE:\n" + layout_structure
         try:
             import os as _os
 
             if not _os.path.isfile(image_path):
                 return {"status": "ok", "fixes": [], "message": ""}
-            result = self._call_llm_with_image(system_prompt, intent, image_path)
+            result = self._call_llm_with_image(system_prompt, user_msg, image_path)
         except Exception:  # noqa: BLE001
             return {"status": "ok", "fixes": [], "message": ""}
         if not isinstance(result, dict):
@@ -407,10 +565,14 @@ class LLMBackend:
         fixes = result.get("fixes") or []
         if not isinstance(fixes, list):
             fixes = []
+        layout_config_overrides = result.get("layout_config_overrides") or {}
+        if not isinstance(layout_config_overrides, dict):
+            layout_config_overrides = {}
         return {
             "status": status,
             "fixes": fixes,
             "message": str(result.get("message", "")),
+            "layout_config_overrides": layout_config_overrides,
         }
 
     def repair_model(self, workflow_json, errors, context_text):

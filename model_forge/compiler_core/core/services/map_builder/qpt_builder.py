@@ -36,6 +36,7 @@ from .pipeline import (
     run_pipeline,
 )
 from .style_templates import (
+    NORTH_ARROW_SVGS,
     PAGE_SIZES_MM,
     PrintTemplate,
     get_template,
@@ -72,6 +73,7 @@ def build_qpt(
     scale: int | None = None,
     layer_meta: dict[str, dict[str, str]] | None = None,
     custom_items: list[LayoutItem] | None = None,
+    auto_orientation: bool = False,
 ) -> str:
     """Build a .qpt document.
 
@@ -92,8 +94,9 @@ def build_qpt(
     ----------
     template
         One of the keys in ``DEFAULT_TEMPLATES``: ``default``,
-        ``scientific``, ``presentation``, ``minimal``. Unknown
-        names fall back to ``default``.
+        ``scientific``, ``presentation``, ``minimal``,
+        ``screen_fullhd``, ``instagram_square``, ``index_a4``,
+        ``drawing_a1``. Unknown names fall back to ``default``.
     title, subtitle, crs, author
         Optional metadata. ``crs`` and ``author`` populate the
         metadata block in scientific-style templates.
@@ -112,6 +115,10 @@ def build_qpt(
         Optional list of pre-positioned ``LayoutItem`` to render
         instead of the template's defaults. Used by the
         verifier-driven re-try loop.
+    auto_orientation
+        When True and ``extent`` is provided, the pipeline
+        auto-selects portrait or landscape based on the
+        extent's aspect ratio.
     """
     t = get_template(template)
 
@@ -129,6 +136,7 @@ def build_qpt(
         output_layer_ids=output_layer_ids,
         extent=extent,
         scale=scale,
+        auto_orientation=auto_orientation,
     )
     spec = run_pipeline(req)
     return emit_qpt_xml(
@@ -431,25 +439,32 @@ def _map_to_xml(
     nothing.
     """
     scale_attr = str(map_zone.scale) if map_zone.scale is not None else "auto"
-    el = ET.Element(
-        "LayoutItemMap",
-        {
-            "id": "map",
-            "x": f"{map_zone.x:.2f}",
-            "y": f"{map_zone.y:.2f}",
-            "width": f"{map_zone.width_mm:.2f}",
-            "height": f"{map_zone.height_mm:.2f}",
-            "position": "0,0",
-            "zValue": "0",
-            "frame": "true",
-            "background": "true",
-            "outlineWidth": "0.4",
-            "grid": "true" if map_zone.map_grid else "false",
-            "annotationEnabled": "false",
-            "scale": scale_attr,
-            "crs": map_zone.crs or "",
-        },
-    )
+    grid = map_zone.grid_spec
+    grid_enabled = grid is not None and grid.enabled
+    attrs: dict[str, str] = {
+        "id": "map",
+        "x": f"{map_zone.x:.2f}",
+        "y": f"{map_zone.y:.2f}",
+        "width": f"{map_zone.width_mm:.2f}",
+        "height": f"{map_zone.height_mm:.2f}",
+        "position": "0,0",
+        "zValue": "0",
+        "frame": "true",
+        "background": "true",
+        "outlineWidth": "0.4",
+        "grid": "true" if grid_enabled else "false",
+        "annotationEnabled": "true" if (grid_enabled and grid.annotation_enabled) else "false",
+        "scale": scale_attr,
+        "crs": map_zone.crs or "",
+    }
+    if grid_enabled and grid.interval_x is not None:
+        attrs["gridIntervalX"] = f"{grid.interval_x}"
+    if grid_enabled and grid.interval_y is not None:
+        attrs["gridIntervalY"] = f"{grid.interval_y}"
+    if grid_enabled:
+        attrs["gridFrameStyle"] = grid.frame_style
+        attrs["gridAnnotationFormat"] = grid.label_format
+    el = ET.Element("LayoutItemMap", attrs)
     if map_zone.layers:
         layer_set = ET.SubElement(el, "LayerSet")
         for layer_id in map_zone.layers:
@@ -499,19 +514,27 @@ def _ancillary_item_to_xml(item: AncillaryItem) -> ET.Element:
         "outlineWidth": "0.4" if item.frame else "0",
     }
     if item.item_type == "scale_bar":
+        seg_count = max(2, min(6, item.scale_bar_segments))
+        seg_mode = "auto"
+        if item.scale_bar_label_format:
+            seg_mode = "custom"
         el = ET.Element(
             "LayoutItemScaleBar",
             {
                 **common,
                 "style": item.scale_bar_style,
                 "units": item.scale_bar_units,
-                "segmentSizeMode": "auto",
+                "segmentSizeMode": seg_mode,
                 "minWidth": "30",
+                "numSegments": str(seg_count),
             },
         )
+        if item.scale_bar_label_format:
+            el.set("labelFormat", item.scale_bar_label_format)
         return el
     if item.item_type == "north_arrow":
-        return ET.Element(
+        svg = NORTH_ARROW_SVGS.get(item.north_arrow_style, NORTH_ARROW_SVGS["default"])
+        el = ET.Element(
             "LayoutItemNorthArrow",
             {
                 **common,
@@ -519,6 +542,9 @@ def _ancillary_item_to_xml(item: AncillaryItem) -> ET.Element:
                 "rotation": str(item.rotation_deg),
             },
         )
+        picture = ET.SubElement(el, "picture")
+        picture.text = svg
+        return el
     raise ValueError(f"Unknown ancillary item type: {item.item_type!r}")
 
 
@@ -533,6 +559,7 @@ def _footer_item_to_xml(item: FooterItem) -> ET.Element:
     """
     sym_w = item.symbol_size_mm if item.symbol_size_mm > 0 else 4.0
     sym_h = item.symbol_size_mm if item.symbol_size_mm > 0 else 4.0
+    col_count = max(0, min(4, item.legend_column_count))
     el = ET.Element(
         "LayoutItemLegend",
         {
@@ -546,10 +573,12 @@ def _footer_item_to_xml(item: FooterItem) -> ET.Element:
             "frame": "true" if item.frame else "false",
             "background": "true" if item.background else "false",
             "outlineWidth": "0.4" if item.frame else "0",
-            "title": "",
+            "title": item.legend_title,
             "symbolWidth": f"{sym_w:.2f}",
             "symbolHeight": f"{sym_h:.2f}",
             "map": item.legend_map_ref,
+            "columnCount": str(col_count) if col_count > 0 else "0",
+            "wrapString": item.legend_wrap_string,
         },
     )
     if item.legend_layers:

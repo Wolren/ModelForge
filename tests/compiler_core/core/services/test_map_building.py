@@ -23,12 +23,16 @@ def test_page_sizes_have_eight_orientations():
     assert a4[0] < a4[1]  # portrait: width < height
 
 
-def test_default_templates_have_four_entries():
+def test_default_templates_have_eight_entries():
     assert set(style_templates.DEFAULT_TEMPLATES.keys()) == {
         "default",
         "scientific",
         "presentation",
         "minimal",
+        "screen_fullhd",
+        "instagram_square",
+        "index_a4",
+        "drawing_a1",
     }
 
 
@@ -210,7 +214,16 @@ def test_qpt_parse_handles_empty_items():
 def test_qpt_list_templates():
     templates = qpt_builder.list_templates()
     names = {t["name"] for t in templates}
-    assert {"default", "scientific", "presentation", "minimal"} <= names
+    assert {
+        "default",
+        "scientific",
+        "presentation",
+        "minimal",
+        "screen_fullhd",
+        "instagram_square",
+        "index_a4",
+        "drawing_a1",
+    } <= names
 
 
 # --- layout_verifier ----------------------------------------------

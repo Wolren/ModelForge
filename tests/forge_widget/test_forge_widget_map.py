@@ -729,6 +729,9 @@ def _install_fake_project_with_layers(
         def addLayoutItem(self, *a: object, **k: object) -> None:
             pass
 
+        def refresh(self) -> None:
+            pass
+
     class _Project:
         _inst: "_Project | None" = None
 
@@ -815,6 +818,9 @@ def _install_fake_project(monkeypatch: pytest.MonkeyPatch, home: str) -> list[An
             pass
 
         def addLayoutItem(self, *a: object, **k: object) -> None:
+            pass
+
+        def refresh(self) -> None:
             pass
 
         def name(self) -> str:

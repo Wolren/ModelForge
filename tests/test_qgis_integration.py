@@ -6,6 +6,13 @@ Or save as Processing script and run from toolbox.
 
 import sys, os
 
+try:
+    import qgis.core  # noqa: F401
+except ImportError:
+    import pytest
+
+    pytest.skip("QGIS not available", allow_module_level=True)
+
 # Point to the plugin source
 PROJECT_ROOT = r"C:\Users\Wildbot\PycharmProjects\Model Forge"
 if PROJECT_ROOT not in sys.path:

@@ -51,6 +51,7 @@ def _log(msg: str) -> None:
 from qgis.PyQt.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QSpinBox,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -188,19 +189,70 @@ class LayoutEvalWorker(QThread):
     a text-only spec summary is used.
     """
 
-    def __init__(self, backend, spec_summary: str, intent: str, image_path: str | None = None):
+    def __init__(
+        self,
+        backend,
+        spec_summary: str,
+        intent: str,
+        image_path: str | None = None,
+        layout_structure: str | None = None,
+    ):
         super().__init__()
         self.backend = backend
         self.spec_summary = spec_summary
         self.intent = intent
         self.image_path = image_path
+        self.layout_structure = layout_structure
 
     def run(self):
         try:
             if self.image_path:
-                result = self.backend.evaluate_layout_image(self.image_path, self.intent)
+                result = self.backend.evaluate_layout_image(
+                    self.image_path, self.intent, layout_structure=self.layout_structure
+                )
             else:
                 result = self.backend.evaluate_layout_spec(self.spec_summary, self.intent)
+            self.finished.emit(result)
+        except Exception as e:  # noqa: BLE001
+            self.error.emit(f"{type(e).__name__}: {e}")
+
+    from qgis.PyQt.QtCore import pyqtSignal
+
+    finished = pyqtSignal(object)
+    error = pyqtSignal(str)
+
+
+class LayoutDesignWithImageWorker(QThread):
+    """QThread wrapper around ``LLMBackend.choose_layout_design_with_image``.
+
+    Used by the iterative refinement loop: the LLM sees the
+    rendered PNG from the previous layout and produces a
+    refined design dict with fixes for visual issues.
+    """
+
+    def __init__(
+        self,
+        backend,
+        intent: str,
+        project_context: str,
+        image_path: str,
+        layout_structure: str | None = None,
+    ):
+        super().__init__()
+        self.backend = backend
+        self.intent = intent
+        self.project_context = project_context
+        self.image_path = image_path
+        self.layout_structure = layout_structure
+
+    def run(self):
+        try:
+            result = self.backend.choose_layout_design_with_image(
+                self.intent,
+                self.project_context,
+                self.image_path,
+                layout_structure=self.layout_structure,
+            )
             self.finished.emit(result)
         except Exception as e:  # noqa: BLE001
             self.error.emit(f"{type(e).__name__}: {e}")
@@ -253,6 +305,10 @@ class ForgeWidgetMapMixin:
                 "scientific",
                 "presentation",
                 "minimal",
+                "screen_fullhd",
+                "instagram_square",
+                "index_a4",
+                "drawing_a1",
             ]
         )
         picker_row.addWidget(self.cmb_map_template)
@@ -300,6 +356,18 @@ class ForgeWidgetMapMixin:
             "On: the AI picks the relevant layers for you.\n"
             "Off: your selection below is the source of truth."
         )
+        self.chk_iterative = QCheckBox("Iterative refinement")
+        self.chk_iterative.setChecked(False)
+        self.chk_iterative.setToolTip(
+            "On: N cycles of layout → render → auto-critique → fix\n"
+            "Off: one-shot layout (no refinement loop)."
+        )
+        self.spn_iterations = QSpinBox()
+        self.spn_iterations.setMinimum(1)
+        self.spn_iterations.setMaximum(20)
+        self.spn_iterations.setValue(5)
+        self.spn_iterations.setToolTip("Number of refinement cycles.")
+        self.spn_iterations.setFixedWidth(50)
         self.lst_map_layers = QListWidget()
         self.lst_map_layers.setSelectionMode(QAbstractItemView.MultiSelection)
         self.lst_map_layers.setMaximumHeight(200)
@@ -308,6 +376,8 @@ class ForgeWidgetMapMixin:
         )
 
         auto_pick_row.addWidget(self.chk_auto_pick)
+        auto_pick_row.addWidget(self.chk_iterative)
+        auto_pick_row.addWidget(self.spn_iterations)
         auto_pick_row.addStretch()
         self.btn_map_select_all = QPushButton("Select all")
         self.btn_map_select_all.clicked.connect(self.lst_map_layers.selectAll)
@@ -877,6 +947,30 @@ class ForgeWidgetMapMixin:
         self._layout_design_worker.error.connect(self._on_layout_design_error)
         self._layout_design_worker.start()
 
+    def _start_image_design_worker(
+        self,
+        intent: str,
+        project_context: str,
+        image_path: str,
+        layout_structure: str | None = None,
+    ) -> None:
+        """Vision-based re-design worker.
+
+        Used by the iterative refinement loop. The LLM sees the
+        rendered PNG from the previous layout iteration and
+        produces a refined design dict with visual fixes.
+        """
+        self.btn_generate_map.setEnabled(False)
+        self.btn_run_model.setEnabled(False)
+        self.progress_map.show()
+        self.lbl_map_status.setText("Vision-based re-design…")
+        self._image_design_worker = LayoutDesignWithImageWorker(
+            self.backend, intent, project_context, image_path, layout_structure=layout_structure
+        )
+        self._image_design_worker.finished.connect(self._on_layout_design_finished)
+        self._image_design_worker.error.connect(self._on_layout_design_error)
+        self._image_design_worker.start()
+
     def _build_project_context_text(self) -> str:
         """Stringify the live project for the LLM.
 
@@ -909,6 +1003,12 @@ class ForgeWidgetMapMixin:
                 f"kind={layer.get('geometry_kind', '?')} "
                 f"({vis}, {extent_str}){tag}"
             )
+        # Append eval feedback from a previous iteration (if any).
+        feedback = getattr(self, "_last_eval_feedback", None)
+        if feedback:
+            lines.append("")
+            lines.append("PREVIOUS LAYOUT FEEDBACK:")
+            lines.append(feedback)
         return "\n".join(lines)
 
     def _refresh_layer_picker(self) -> None:
@@ -1031,13 +1131,44 @@ class ForgeWidgetMapMixin:
 
         title = design.get("title", "") or "Project Map"
         subtitle = design.get("subtitle", "") or ""
-        template = design.get("template", "default")
-        if template not in {"default", "scientific", "presentation", "minimal"}:
+        # The user's template combo selection is the source of
+        # truth — always use it over the LLM's suggestion.
+        template = self.cmb_map_template.currentText()
+        if template not in {
+            "default",
+            "scientific",
+            "presentation",
+            "minimal",
+            "screen_fullhd",
+            "instagram_square",
+            "index_a4",
+            "drawing_a1",
+        }:
             template = "default"
-        # Reflect the LLM's choice in the template combo.
-        idx = self.cmb_map_template.findText(template)
-        if idx >= 0:
-            self.cmb_map_template.setCurrentIndex(idx)
+
+        # Extract advanced layout configuration from the LLM,
+        # then merge any overrides suggested by the previous eval
+        # iteration (if the LLM didn't apply them itself).
+        lc = design.get("layout_config", {}) or {}
+        prev_ov = getattr(self, "_last_layout_config_overrides", None)
+        if prev_ov:
+            lc = {**lc, **prev_ov}
+            self._last_layout_config_overrides = {}
+        na_style = str(lc.get("north_arrow_style", "")).strip()
+        if na_style not in {"default", "compass", "fancy", "minimal", "line"}:
+            na_style = ""
+        sb_seg = int(lc.get("scale_bar_segments", 0))
+        if sb_seg < 2 or sb_seg > 6:
+            sb_seg = 0
+        sb_label = str(lc.get("scale_bar_label_format", "")).strip()[:80]
+        leg_title = str(lc.get("legend_title", "")).strip()[:120]
+        leg_cols = int(lc.get("legend_column_count", 0))
+        if leg_cols < 0 or leg_cols > 4:
+            leg_cols = 0
+        leg_wrap = str(lc.get("legend_wrap_string", "")).strip()[:10]
+        leg_font = float(lc.get("legend_font_size_mm", 0.0))
+        if leg_font < 0 or leg_font > 20:
+            leg_font = 0.0
 
         # Layer selection. The user-ticked list is the source
         # of truth; the LLM's choices are a fallback.
@@ -1057,16 +1188,6 @@ class ForgeWidgetMapMixin:
                 "the layers you want to show first.",
             )
             return
-
-        title = design.get("title", "") or "Project Map"
-        subtitle = design.get("subtitle", "") or ""
-        template = design.get("template", "default")
-        if template not in {"default", "scientific", "presentation", "minimal"}:
-            template = "default"
-        # Reflect the LLM's choice in the template combo.
-        idx = self.cmb_map_template.findText(template)
-        if idx >= 0:
-            self.cmb_map_template.setCurrentIndex(idx)
 
         # Synthesise a model JSON for the layout pipeline.
         # We use the LLM-picked layer ids as the algorithm
@@ -1098,6 +1219,13 @@ class ForgeWidgetMapMixin:
             template,
             title=title,
             layer_meta=layer_meta,
+            north_arrow_style=na_style,
+            scale_bar_segments=sb_seg,
+            scale_bar_label_format=sb_label,
+            legend_title=leg_title,
+            legend_column_count=leg_cols,
+            legend_wrap_string=leg_wrap,
+            legend_font_size_mm=leg_font,
         )
 
         # Verifier + designer open.
@@ -1115,12 +1243,24 @@ class ForgeWidgetMapMixin:
             f"AI layout: '{title}' ({len(picked)} layer(s), {template}) → {qpt_path}"
         )
 
-        # Fire the layout evaluation loop (max 2 retries, image-based).
-        self._layout_eval_retries = getattr(self, "_layout_eval_retries", 2)
-        if self._layout_eval_retries > 0 and self._llm_configured():
-            spec_summary = self._build_spec_summary(design, picked, title, template, model_json)
-            image_path = self._render_layout_to_image()
-            self._start_eval_worker(spec_summary, title, image_path=image_path)
+        # Iterative refinement: when checkbox is on, up to 5 cycles
+        # of build → render PNG → LLM vision-critique → fix → rebuild.
+        if self.chk_iterative.isChecked() and self._llm_configured():
+            self._pipeline_iteration = getattr(self, "_pipeline_iteration", 0) + 1
+            self._pipeline_max_iter = self.spn_iterations.value()
+            if self._pipeline_iteration <= self._pipeline_max_iter:
+                image_path = self._render_layout_to_image()
+                spec = getattr(self, "_last_layout_spec", None)
+                layout_text = self._layout_spec_to_text(spec) if spec is not None else ""
+                self.lbl_map_status.setText(
+                    f"Iteration {self._pipeline_iteration}/{self._pipeline_max_iter}: evaluating…"
+                )
+                self._start_eval_worker(
+                    "", title, image_path=image_path, layout_structure=layout_text
+                )
+            else:
+                self._pipeline_iteration = 0
+                self._last_layout_config_overrides = {}
 
     def _build_spec_summary(
         self,
@@ -1144,6 +1284,93 @@ class ForgeWidgetMapMixin:
             self.lst_map_verifier.item(i).text() for i in range(self.lst_map_verifier.count())
         ]
         lines.append(f"Verifier: {'; '.join(v_items[:6])}")
+        return "\n".join(lines)
+
+    def _layout_spec_to_text(self, spec: Any) -> str:
+        """Serialize a LayoutSpec to a structured text block with precise coordinates."""
+        lines: list[str] = []
+        lines.append("LAYOUT STRUCTURE (exact coordinates in mm):")
+        lines.append("")
+        # Page
+        p = spec.page
+        lines.append(f"Page: {p.width_mm:.1f} x {p.height_mm:.1f} mm, margin={p.margin_mm:.1f} mm")
+        lines.append(
+            f"  Inner area: x={p.inner_x:.1f} y={p.inner_y:.1f} w={p.inner_w:.1f} h={p.inner_h:.1f}"
+        )
+        lines.append("")
+        # Header
+        h = spec.header
+        lines.append(f"Header band ({'empty' if not h.items else f'{len(h.items)} item(s)'}):")
+        for item in h.items:
+            lines.append(
+                f"  [{item.role}] text={item.text!r} "
+                f"x={item.x:.1f} y={item.y:.1f} w={item.width:.1f} h={item.height:.1f}"
+            )
+        lines.append("")
+        # Map
+        m = spec.map
+        extent_str = ""
+        if m.extent:
+            extent_str = f" extent=({m.extent[0]:.4f}, {m.extent[1]:.4f}, {m.extent[2]:.4f}, {m.extent[3]:.4f})"
+        lines.append(
+            f"Map zone: x={m.x:.1f} y={m.y:.1f} w={m.width_mm:.1f} h={m.height_mm:.1f}"
+            f"  scale={m.scale or 'auto'}{extent_str}"
+        )
+        lines.append(f"  Layers: {len(m.layers)} bound to map")
+        lines.append("")
+        # Ancillaries (north arrow, scale bar)
+        a = spec.ancillaries
+        lines.append(f"Ancillaries ({'empty' if not a.items else f'{len(a.items)} item(s)'}):")
+        for item in a.items:
+            extra = ""
+            if item.item_type == "north_arrow":
+                extra = f" style={item.north_arrow_style}"
+            elif item.item_type == "scale_bar":
+                extra = f" segs={item.scale_bar_segments}"
+                if item.scale_bar_label_format:
+                    extra += f" fmt={item.scale_bar_label_format!r}"
+            lines.append(
+                f"  [{item.item_type}] x={item.x:.1f} y={item.y:.1f} "
+                f"w={item.width_mm:.1f} h={item.height_mm:.1f}"
+                f"  frame={item.frame} bg={item.background}{extra}"
+            )
+        # Grid
+        g = spec.map.grid_spec
+        if g is not None and g.enabled:
+            lines.append(
+                f"  Grid: enabled, frame_style={g.frame_style}, "
+                f"annotation={g.annotation_enabled}, "
+                f"label_format={g.label_format}"
+            )
+            if g.interval_x is not None:
+                lines.append(f"  Grid interval X={g.interval_x}")
+            if g.interval_y is not None:
+                lines.append(f"  Grid interval Y={g.interval_y}")
+        else:
+            lines.append("  Grid: disabled")
+        lines.append("")
+        # Footer (legend)
+        f = spec.footer
+        lines.append(f"Footer band ({'empty' if not f.items else f'{len(f.items)} item(s)'}):")
+        for item in f.items:
+            leg_extra = ""
+            if item.item_type == "legend":
+                parts = []
+                if item.legend_title:
+                    parts.append(f"title={item.legend_title!r}")
+                if item.legend_column_count > 0:
+                    parts.append(f"cols={item.legend_column_count}")
+                if item.legend_wrap_string:
+                    parts.append(f"wrap={item.legend_wrap_string!r}")
+                if item.legend_font_size_mm > 0:
+                    parts.append(f"font={item.legend_font_size_mm}mm")
+                if parts:
+                    leg_extra = "  " + " | ".join(parts)
+            lines.append(
+                f"  [{item.item_type}] x={item.x:.1f} y={item.y:.1f} "
+                f"w={item.width_mm:.1f} h={item.height_mm:.1f}"
+                f"  frame={item.frame} bg={item.background}{leg_extra}"
+            )
         return "\n".join(lines)
 
     def _render_layout_to_image(self) -> str | None:
@@ -1176,7 +1403,11 @@ class ForgeWidgetMapMixin:
             return None
 
     def _start_eval_worker(
-        self, spec_summary: str, intent: str, image_path: str | None = None
+        self,
+        spec_summary: str,
+        intent: str,
+        image_path: str | None = None,
+        layout_structure: str | None = None,
     ) -> None:
         """Fire the evaluation worker (image-based when possible)."""
         self.progress_map.show()
@@ -1186,34 +1417,83 @@ class ForgeWidgetMapMixin:
             spec_summary,
             intent,
             image_path=image_path,
+            layout_structure=layout_structure,
         )
         self._layout_eval_worker.finished.connect(self._on_eval_finished)
         self._layout_eval_worker.error.connect(self._on_eval_error)
         self._layout_eval_worker.start()
 
     def _on_eval_finished(self, suggestions: dict) -> None:
-        """Apply layout fixes if the LLM found issues, or stop."""
+        """Apply layout fixes if the LLM found issues, or stop.
+
+        When status is "fix", the eval feedback is stored and
+        the layout worker is re-triggered with the context of
+        what was wrong — mirroring the model-forger's
+        generate → validate → repair → re-generate loop.
+        """
         self.progress_map.hide()
-        self._layout_eval_retries -= 1
         if not isinstance(suggestions, dict):
             return
         status = suggestions.get("status", "ok")
-        if status != "fix":
-            self.lbl_map_status.setText(self.lbl_map_status.text() + " [eval: OK]")
-            return
         fixes = suggestions.get("fixes") or []
-        if not fixes:
-            return
-        # Rebuild with the same design but adjusted positions.
-        # For now we just log the fixes. A full rebuild
-        # with position adjustments is handled in a future pass.
         msg = suggestions.get("message", "")
-        self.lst_map_verifier.addItem(QListWidgetItem(f"[eval] {msg} ({len(fixes)} fix(es))"))
-        self.lbl_map_status.setText(self.lbl_map_status.text() + f" [eval: {len(fixes)} fix(es)]")
-        # Loop: if retries remain, the next Generate Map click
-        # regenerates the map and fires eval again. Auto-recall
-        # is deferred to the next version.
-        _log(f"Layout eval: {msg} fixes={fixes}")
+        if status == "fix" and fixes:
+            # Log the eval findings.
+            self.lst_map_verifier.addItem(
+                QListWidgetItem(f"[eval #{self._pipeline_iteration}] {msg} ({len(fixes)} fix(es))")
+            )
+            _log(f"Layout eval #{self._pipeline_iteration}: {msg} fixes={fixes}")
+
+        # If iterations remain, re-render and send the image
+        # to the LLM for a vision-based re-design.
+        if (
+            self._pipeline_iteration < self._pipeline_max_iter
+            and self._llm_configured()
+            and self.chk_iterative.isChecked()
+        ):
+            self._last_eval_feedback = msg or "no detail"
+            # Store layout_config overrides from the eval so the
+            # re-design LLM can apply them.
+            overrides = suggestions.get("layout_config_overrides") or {}
+            if isinstance(overrides, dict) and overrides:
+                self._last_layout_config_overrides = overrides
+            else:
+                self._last_layout_config_overrides = {}
+            self.lbl_map_status.setText(
+                f"Iteration {self._pipeline_iteration}/{self._pipeline_max_iter}: "
+                f"re-designing ({msg[:60]})…"
+            )
+            image_path = self._render_layout_to_image()
+            if image_path:
+                ctx = self._build_project_context_text()
+                spec = getattr(self, "_last_layout_spec", None)
+                layout_text = self._layout_spec_to_text(spec) if spec is not None else ""
+                # Append suggested overrides as context for the re-design LLM.
+                ov = getattr(self, "_last_layout_config_overrides", {})
+                if ov:
+                    ov_lines = "\nSUGGESTED LAYOUT CONFIG OVERRIDES:\n"
+                    for k, v in ov.items():
+                        ov_lines += f"  {k} = {v}\n"
+                    layout_text += ov_lines
+                self._start_image_design_worker(
+                    self.txt_map_intent.toPlainText().strip(),
+                    ctx,
+                    image_path,
+                    layout_structure=layout_text,
+                )
+            else:
+                self._pipeline_iteration = 0
+        else:
+            # Done — reset iteration counter and clear stale overrides.
+            self._pipeline_iteration = 0
+            self._last_layout_config_overrides = {}
+            if status == "ok" or not fixes:
+                self.lbl_map_status.setText(self.lbl_map_status.text() + " [eval: OK]")
+            else:
+                self.lbl_map_status.setText(
+                    self.lbl_map_status.text() + f" [max iterations, {len(fixes)} issue(s) remain]"
+                )
+            _log("Layout pipeline finished")
 
     def _on_eval_error(self, msg: str) -> None:
         self.progress_map.hide()
@@ -1349,9 +1629,18 @@ class ForgeWidgetMapMixin:
         template: str,
         title: str | None = None,
         layer_meta: dict[str, dict[str, str]] | None = None,
+        north_arrow_style: str = "",
+        scale_bar_segments: int = 0,
+        scale_bar_label_format: str = "",
+        legend_title: str = "",
+        legend_column_count: int = 0,
+        legend_wrap_string: str = "",
+        legend_font_size_mm: float = 0.0,
     ) -> str:
         from model_forge.compiler_core.core.services.map_builder import (
-            build_qpt,
+            LayoutRequest,
+            emit_qpt_xml,
+            run_pipeline,
         )
 
         qpt_path = self._layout_path(model_json, template)
@@ -1364,13 +1653,28 @@ class ForgeWidgetMapMixin:
             f"extent={extent!r} "
             f"output_ids={output_ids}"
         )
-        qpt_xml = build_qpt(
-            template,
+        req = LayoutRequest(
+            template=template,
             title=title or model_json.get("model_name", "Model Forge Map"),
             subtitle=model_json.get("model_group", ""),
             crs=crs,
-            output_layer_ids=[a.get("id") for a in model_json.get("algorithms", [])],
+            output_layer_ids=output_ids,
             extent=extent,
+            auto_orientation=True,
+            north_arrow_style=north_arrow_style,
+            scale_bar_segments=scale_bar_segments,
+            scale_bar_label_format=scale_bar_label_format,
+            legend_title=legend_title,
+            legend_column_count=legend_column_count,
+            legend_wrap_string=legend_wrap_string,
+            legend_font_size_mm=legend_font_size_mm,
+        )
+        spec = run_pipeline(req)
+        self._last_layout_spec = spec
+        qpt_xml = emit_qpt_xml(
+            spec,
+            template_name=template,
+            title=title or model_json.get("model_name", ""),
             layer_meta=layer_meta,
         )
         with open(qpt_path, "w", encoding="utf-8") as f:
@@ -1547,6 +1851,7 @@ class ForgeWidgetMapMixin:
         subtitle: str = "",
         template: str = "default",
         layer_meta: dict[str, dict[str, str]] | None = None,
+        design: dict | None = None,
     ) -> None:
         """Build the layout in QGIS using the Python API directly.
 
@@ -1599,24 +1904,79 @@ class ForgeWidgetMapMixin:
         label.attemptResize(QgsLayoutSize(190, 12, QgsUnitTypes.LayoutMillimeters))
         layout.addLayoutItem(label)
 
-        # Map item
+        # Map item — following the reference plugin pattern:
+        # 1. Set CRS 2. Add to layout 3. Zoom to extent 4. Configure frame
         map_item = QgsLayoutItemMap(layout)
-        map_item.attemptMove(QgsLayoutPoint(10, 25, QgsUnitTypes.LayoutMillimeters))
-        map_item.attemptResize(QgsLayoutSize(190, 190, QgsUnitTypes.LayoutMillimeters))
-        extent = self._current_canvas_extent() or self._current_project_extent()
-        if extent is not None:
-            map_item.setExtent(QgsRectangle(extent[0], extent[1], extent[2], extent[3]))
-        map_item.setFrameEnabled(True)
-        # Set map background so it's visible even without data
         try:
-            map_item.setBackgroundEnabled(True)
+            map_item.setCrs(QgsProject.instance().crs())
         except Exception:  # noqa: BLE001
             pass
-        layout.addLayoutItem(map_item)
+        map_item.attemptMove(QgsLayoutPoint(10, 25, QgsUnitTypes.LayoutMillimeters))
+        map_item.attemptResize(QgsLayoutSize(190, 190, QgsUnitTypes.LayoutMillimeters))
+        layout.addLayoutItem(map_item)  # add before setting extent
+        extent = self._current_canvas_extent() or self._current_project_extent()
+        if extent is not None:
+            try:
+                map_item.zoomToExtent(QgsRectangle(extent[0], extent[1], extent[2], extent[3]))
+            except Exception:  # noqa: BLE001
+                map_item.setExtent(QgsRectangle(extent[0], extent[1], extent[2], extent[3]))
+        map_item.setFrameEnabled(True)
+        try:
+            map_item.setBackgroundEnabled(True)
+            map_item.setFrameStrokeWidth(0.4)
+        except Exception:  # noqa: BLE001
+            pass
+        map_item.refresh()
+        layout.refresh()
 
-        # Legend — only show layers the user picked, not all 14.
+        # Page border (QgsLayoutItemShape rectangle, like the reference).
+        try:
+            from qgis.core import QgsFillSymbol, QgsLayoutItemShape
+
+            border = QgsLayoutItemShape(layout)
+            border.setShapeType(QgsLayoutItemShape.Rectangle)
+            border.setSymbol(
+                QgsFillSymbol.createSimple(
+                    {
+                        "outline_color": "black",
+                        "outline_width": "0.5",
+                        "color": "255,255,255,0",
+                    }
+                )
+            )
+            layout.addLayoutItem(border)
+            border.attemptMove(QgsLayoutPoint(5, 5, QgsUnitTypes.LayoutMillimeters))
+            border.attemptResize(QgsLayoutSize(200, 255, QgsUnitTypes.LayoutMillimeters))
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Coordinate grid (EPSG:4326 annotations, per reference).
+        try:
+            from qgis.core import (
+                QgsCoordinateReferenceSystem,
+                QgsCoordinateTransform,
+                QgsLayoutItemMapGrid,
+            )
+
+            grid = QgsLayoutItemMapGrid("grid", map_item)
+            grid.setEnabled(True)
+            grid.setCrs(QgsCoordinateReferenceSystem("EPSG:4326"))
+            grid.setIntervalX(0.5)
+            grid.setIntervalY(0.5)
+            grid.setAnnotationEnabled(True)
+            grid.setAnnotationFont(QFont("Arial", 6))
+            try:
+                grid.setAnnotationFormat(QgsLayoutItemMapGrid.DecimalWithSuffix)
+            except Exception:  # noqa: BLE001
+                pass
+            map_item.grids().addGrid(grid)
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Legend — linked to the map (so it only shows layers visible in it).
         legend = QgsLayoutItemLegend(layout)
-        legend.setTitle("")
+        legend.setTitle("Legend")
+        legend.setLinkedMap(map_item)
         try:
             legend.setAutoUpdateModel(False)
             root = legend.modelRootGroup()
@@ -1628,8 +1988,7 @@ class ForgeWidgetMapMixin:
                 for lid, meta in layer_meta.items():
                     ql = proj.mapLayer(lid)
                     if ql is not None:
-                        node = QgsLayerTreeLayer(ql)
-                        root.addChildNode(node)
+                        root.addChildNode(QgsLayerTreeLayer(ql))
         except Exception:  # noqa: BLE001
             pass
         legend.attemptMove(QgsLayoutPoint(10, 220, QgsUnitTypes.LayoutMillimeters))
@@ -1637,8 +1996,14 @@ class ForgeWidgetMapMixin:
         legend.setFrameEnabled(True)
         legend.setBackgroundEnabled(True)
         layout.addLayoutItem(legend)
+        # Adjust legend to fit its content (per AutoLayoutTool reference)
+        try:
+            legend.adjustBoxSize()
+            legend.refresh()
+        except Exception:  # noqa: BLE001
+            pass
 
-        # Scale bar (linked to the map)
+        # Scale bar (linked to the map, with update() call per reference)
         scale_bar = QgsLayoutItemScaleBar(layout)
         scale_bar.setLinkedMap(map_item)
         scale_bar.applyDefaultSettings()
@@ -1649,15 +2014,15 @@ class ForgeWidgetMapMixin:
         scale_bar.attemptResize(QgsLayoutSize(60, 8, QgsUnitTypes.LayoutMillimeters))
         scale_bar.setFrameEnabled(True)
         scale_bar.setBackgroundEnabled(True)
+        scale_bar.update()
         layout.addLayoutItem(scale_bar)
 
-        # North arrow
+        # North arrow — using the reference's confirmed SVG path
         north = QgsLayoutItemPicture(layout)
         for svg_path in (
-            "qgis:/images/north_arrows/default_north_arrow.svg",
+            ":/images/north_arrows/layout_default_north_arrow.svg",
+            ":/images/north_arrows/default_north_arrow.svg",
             ":/images/north_arrows/simple_arrow_01.svg",
-            ":/images/north_arrows/simple_arrow_02.svg",
-            "qgis:/images/north_arrows/simple_arrow_01.svg",
         ):
             try:
                 north.setPicturePath(svg_path)
@@ -1668,6 +2033,30 @@ class ForgeWidgetMapMixin:
         north.attemptResize(QgsLayoutSize(15, 15, QgsUnitTypes.LayoutMillimeters))
         north.setFrameEnabled(True)
         layout.addLayoutItem(north)
+
+        # "North" label below the arrow (per reference).
+        try:
+            north_label = QgsLayoutItemLabel(layout)
+            north_label.setText("N")
+            north_label.setFont(QFont("Arial", 7, QFont.Bold))
+            north_label.setHAlign(Qt.AlignHCenter)
+            layout.addLayoutItem(north_label)
+            north_label.attemptMove(QgsLayoutPoint(12, 43, QgsUnitTypes.LayoutMillimeters))
+            north_label.attemptResize(QgsLayoutSize(15, 5, QgsUnitTypes.LayoutMillimeters))
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Scale ratio label (per reference).
+        try:
+            scale_label = QgsLayoutItemLabel(layout)
+            s = int(getattr(map_item, "scale", lambda: 0)() or 0)
+            scale_label.setText(f"Scale 1:{s:,}" if s else "Scale")
+            scale_label.setFont(QFont("Arial", 7))
+            layout.addLayoutItem(scale_label)
+            scale_label.attemptMove(QgsLayoutPoint(14, 217, QgsUnitTypes.LayoutMillimeters))
+            scale_label.attemptResize(QgsLayoutSize(60, 5, QgsUnitTypes.LayoutMillimeters))
+        except Exception:  # noqa: BLE001
+            pass
 
         # Register with the project
         proj.layoutManager().addLayout(layout)

@@ -70,6 +70,27 @@ class LayoutRequest:
     extent: tuple[float, float, float, float] | None = None  # xmin, ymin, xmax, ymax
     # Model's intended scale. Optional - overrides auto.
     scale: int | None = None  # e.g. 25000 for 1:25,000
+    # When True and ``extent`` is provided, the page_setup stage
+    # will choose the page orientation (portrait vs landscape)
+    # that best matches the extent's aspect ratio. The LLM can
+    # still override by picking a specific template.
+    auto_orientation: bool = False
+    # North arrow SVG style. One of ``NORTH_ARROW_SVGS`` keys
+    # in ``style_templates``. Empty string = use profile default.
+    north_arrow_style: str = ""
+    # Scale bar: number of segments (2-6). 0 = profile default.
+    scale_bar_segments: int = 0
+    # Scale bar: custom label format (e.g. "{value} km").
+    # Empty = auto-format from extent magnitude.
+    scale_bar_label_format: str = ""
+    # Legend: title string shown at top of legend box.
+    legend_title: str = ""
+    # Legend: number of columns (1-4). 0 = auto.
+    legend_column_count: int = 0
+    # Legend: character to wrap long labels at.
+    legend_wrap_string: str = ""
+    # Legend: font size in mm. 0 = auto from profile.
+    legend_font_size_mm: float = 0.0
 
 
 @dataclass
@@ -138,6 +159,24 @@ class HeaderSpec:
 
 
 @dataclass
+class GridSpec:
+    """Coordinate grid (graticule) configuration for the map.
+
+    Controls interval, frame style, and annotation format.
+    ``None`` interval values mean "auto-compute from extent".
+    """
+
+    enabled: bool = True
+    interval_x: float | None = None
+    interval_y: float | None = None
+    frame_style: str = "solid"  # solid | crosses | interior_ticks | exterior_ticks
+    label_format: str = "decimal"  # decimal | degree_minute | degree_minute_second
+    annotation_enabled: bool = True
+    grid_color: str = "#000000"
+    grid_width_mm: float = 0.2
+
+
+@dataclass
 class MapSpec:
     """Output of :func:`stage_map_zone`."""
 
@@ -156,8 +195,8 @@ class MapSpec:
     # Layers the map should display. Empty = "all layers in
     # the project at load time".
     layers: list[str] = field(default_factory=list)
-    # Map-level grid (graticule) on/off.
-    map_grid: bool = True
+    # Coordinate grid (graticule) config. None = no grid.
+    grid_spec: GridSpec | None = None
     # CRS, in case the LLM wants a per-map CRS override.
     crs: str = ""
 
@@ -185,6 +224,13 @@ class AncillaryItem:
     # Whether to fill the frame with a white background.
     # Default True for both - keeps ancillaries readable.
     background: bool = True
+    # North arrow: SVG style name, key into ``NORTH_ARROW_SVGS``.
+    # Empty string = default arrow. Only used for north_arrow items.
+    north_arrow_style: str = "default"
+    # Scale bar: number of segments (2-6). 0 = auto (3).
+    scale_bar_segments: int = 3
+    # Scale bar: custom label format string. Empty = auto.
+    scale_bar_label_format: str = ""
 
 
 @dataclass
@@ -216,6 +262,15 @@ class FooterItem:
     # Symbol size in mm; 0 = let the legend compute from
     # font size.
     symbol_size_mm: float = 0.0
+    # Legend: title string shown at top of the legend box.
+    legend_title: str = ""
+    # Legend: number of columns (1-4). 0 = auto (single column).
+    legend_column_count: int = 0
+    # Legend: character at which to wrap long labels.
+    # Empty = no wrapping.
+    legend_wrap_string: str = ""
+    # Legend: font size in mm. 0 = auto from profile.
+    legend_font_size_mm: float = 0.0
 
 
 @dataclass
@@ -277,14 +332,20 @@ class CartographicProfile:
     # "visible at the map's scale" - for v1 we just inherit
     # the user's output_layer_ids.
     legend_filter_mode: str = "visible_at_scale"
+    # North arrow SVG style (key into ``NORTH_ARROW_SVGS``).
+    north_arrow_style: str = "default"
+    # Scale bar: default number of segments.
+    scale_bar_segments: int = 3
+    # Scale bar: default label format (empty = auto).
+    scale_bar_label_format: str = ""
 
 
 _PROFILES: dict[str, CartographicProfile] = {
     "scientific": CartographicProfile(
         name="scientific",
         page_grid=True,
-        bleed_mm=3.0,  # offset-print bleed
-        include_metadata_block=True,  # date / CRS / scale row
+        bleed_mm=3.0,
+        include_metadata_block=True,
         include_scale_bar=True,
         include_north_arrow=True,
         include_legend=True,
@@ -294,6 +355,9 @@ _PROFILES: dict[str, CartographicProfile] = {
         metadata_size_mm=3.5,
         scale_bar_style="single_box",
         scale_bar_units="auto",
+        north_arrow_style="compass",
+        scale_bar_segments=4,
+        scale_bar_label_format="",
     ),
     "internal": CartographicProfile(
         name="internal",
@@ -309,21 +373,27 @@ _PROFILES: dict[str, CartographicProfile] = {
         metadata_size_mm=0.0,
         scale_bar_style="single_box",
         scale_bar_units="auto",
+        north_arrow_style="default",
+        scale_bar_segments=3,
+        scale_bar_label_format="",
     ),
     "presentation": CartographicProfile(
         name="presentation",
         page_grid=False,
         bleed_mm=0.0,
         include_metadata_block=False,
-        include_scale_bar=False,  # 16:9 - scale is visual noise
+        include_scale_bar=False,
         include_north_arrow=True,
-        include_legend=True,  # brief, bottom-right corner
+        include_legend=True,
         include_graticule=False,
         title_size_mm=12.0,
         subtitle_size_mm=6.0,
         metadata_size_mm=0.0,
         scale_bar_style="single_box",
         scale_bar_units="auto",
+        north_arrow_style="minimal",
+        scale_bar_segments=3,
+        scale_bar_label_format="",
     ),
     "minimal": CartographicProfile(
         name="minimal",
@@ -332,13 +402,16 @@ _PROFILES: dict[str, CartographicProfile] = {
         include_metadata_block=False,
         include_scale_bar=True,
         include_north_arrow=True,
-        include_legend=False,  # map only
+        include_legend=False,
         include_graticule=False,
         title_size_mm=5.0,
         subtitle_size_mm=3.5,
         metadata_size_mm=0.0,
         scale_bar_style="line",
         scale_bar_units="auto",
+        north_arrow_style="line",
+        scale_bar_segments=2,
+        scale_bar_label_format="",
     ),
 }
 
@@ -364,13 +437,18 @@ def stage_page_setup(req: LayoutRequest) -> PageSpec:
     """Resolve paper size, orientation, margins, bleed, and grid.
 
     The template's ``page`` field is the key into
-    :data:`PAGE_SIZES_MM`; if the LLM passed ``extent`` /
-    ``scale`` and the page is landscape, we keep the page in
-    landscape (QGIS handles scale-on-flip automatically).
+    :data:`PAGE_SIZES_MM`; if ``auto_orientation`` is True and an
+    extent is provided, the page orientation is flipped to match
+    the extent's aspect ratio (wide extent → landscape, tall →
+    portrait). The LLM can still override by picking a specific
+    template - auto-orientation only flips the page key.
     """
     t = get_template(req.template)
     profile = get_profile(req.template)
-    page_w, page_h = PAGE_SIZES_MM[t.page]
+    page_key = t.page
+    if req.auto_orientation and req.extent is not None:
+        page_key = _orient_to_extent(page_key, req.extent)
+    page_w, page_h = PAGE_SIZES_MM[page_key]
     margin = t.margin_mm
     bleed = profile.bleed_mm
     page = PageSpec(
@@ -519,6 +597,15 @@ def stage_map_zone(
     else:
         scale = req.scale  # may be None (auto)
 
+    # Create a GridSpec when the profile enables the graticule.
+    if profile.include_graticule:
+        grid = GridSpec(
+            enabled=True,
+            annotation_enabled=True,
+        )
+    else:
+        grid = None
+
     map = MapSpec(
         x=page.inner_x,
         y=map_y,
@@ -527,7 +614,7 @@ def stage_map_zone(
         scale=scale,
         extent=extent,
         layers=list(req.output_layer_ids or []),
-        map_grid=profile.include_graticule,
+        grid_spec=grid,
         crs=req.crs,
     )
     return map
@@ -560,6 +647,7 @@ def stage_ancillaries(
 
     if profile.include_north_arrow:
         arrow_size = max(page.margin_mm * 1.5, 10.0)
+        na_style = req.north_arrow_style or profile.north_arrow_style
         items.append(
             AncillaryItem(
                 item_type="north_arrow",
@@ -570,12 +658,17 @@ def stage_ancillaries(
                 rotation_deg=0.0,
                 frame=True,
                 background=True,
+                north_arrow_style=na_style,
             )
         )
 
     if profile.include_scale_bar:
         sb_w = max(min(map.width_mm * 0.30, 60.0), 25.0)
         sb_h = max(15.0, page.margin_mm * 1.0)
+        sb_seg = (
+            req.scale_bar_segments if req.scale_bar_segments > 0 else profile.scale_bar_segments
+        )
+        sb_label = req.scale_bar_label_format or profile.scale_bar_label_format
         items.append(
             AncillaryItem(
                 item_type="scale_bar",
@@ -585,6 +678,8 @@ def stage_ancillaries(
                 height_mm=sb_h,
                 scale_bar_units=profile.scale_bar_units,
                 scale_bar_style=profile.scale_bar_style,
+                scale_bar_segments=sb_seg,
+                scale_bar_label_format=sb_label,
                 frame=True,
                 background=True,
             )
@@ -657,6 +752,10 @@ def stage_footer_band(
             legend_map_ref="map",
             frame=True,
             background=True,
+            legend_title=req.legend_title,
+            legend_column_count=req.legend_column_count,
+            legend_wrap_string=req.legend_wrap_string,
+            legend_font_size_mm=req.legend_font_size_mm,
         )
     )
 
@@ -723,12 +822,37 @@ def _format_metadata(*, crs: str, author: str) -> str:
     return "  |  ".join(parts)
 
 
+def _orient_to_extent(
+    page_key: str,
+    extent: tuple[float, float, float, float],
+) -> str:
+    """Flip page orientation to match extent aspect ratio.
+
+    If the extent is wider than tall, prefer landscape; if
+    taller than wide, prefer portrait. Returns the original
+    ``page_key`` if no matching variant is found.
+    """
+    xmin, ymin, xmax, ymax = extent
+    extent_w = xmax - xmin
+    extent_h = ymax - ymin
+    if extent_w <= 0 or extent_h <= 0:
+        return page_key
+
+    is_wide = extent_w > extent_h
+    if is_wide and "_portrait" in page_key:
+        return page_key.replace("_portrait", "_landscape")
+    if not is_wide and "_landscape" in page_key:
+        return page_key.replace("_landscape", "_portrait")
+    return page_key
+
+
 __all__ = [
     "LayoutRequest",
     "PageSpec",
     "HeaderSpec",
     "HeaderItem",
     "MapSpec",
+    "GridSpec",
     "AncillarySpec",
     "AncillaryItem",
     "FooterSpec",

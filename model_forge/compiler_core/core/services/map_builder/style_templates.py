@@ -16,6 +16,50 @@ from dataclasses import dataclass
 from typing import Any
 
 
+# --- North arrow SVG library -----------------------------------
+
+NORTH_ARROW_SVGS: dict[str, str] = {
+    "default": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        '<polygon points="50,5 15,90 50,70 85,90" fill="#000000"/>'
+        '<polygon points="50,5 50,70 85,90" fill="#666666"/>'
+        "</svg>"
+    ),
+    "compass": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        '<circle cx="50" cy="50" r="45" fill="none" stroke="#000" stroke-width="2"/>'
+        '<polygon points="50,5 30,50 50,40 70,50" fill="#000"/>'
+        '<polygon points="50,95 30,50 50,60 70,50" fill="#ccc"/>'
+        '<text x="50" y="8" text-anchor="middle" font-size="12" fill="#000" font-weight="bold">N</text>'
+        "</svg>"
+    ),
+    "fancy": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        '<circle cx="50" cy="50" r="42" fill="none" stroke="#000" stroke-width="1"/>'
+        '<circle cx="50" cy="50" r="38" fill="none" stroke="#000" stroke-width="0.5"/>'
+        '<polygon points="50,5 30,50 50,38 70,50" fill="#000"/>'
+        '<polygon points="50,95 30,50 50,62 70,50" fill="#888"/>'
+        '<line x1="8" y1="50" x2="92" y2="50" stroke="#000" stroke-width="0.5"/>'
+        '<line x1="50" y1="8" x2="50" y2="92" stroke="#000" stroke-width="0.5"/>'
+        '<text x="50" y="6" text-anchor="middle" font-size="10" fill="#000" font-weight="bold">N</text>'
+        '<text x="50" y="98" text-anchor="middle" font-size="8" fill="#888">S</text>'
+        "</svg>"
+    ),
+    "minimal": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        '<polygon points="50,5 10,90 50,70 90,90" fill="#333333"/>'
+        '<polygon points="50,5 50,70 90,90" fill="#888888"/>'
+        "</svg>"
+    ),
+    "line": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        '<polygon points="50,5 30,45 42,40 42,95 58,95 58,40 70,45" fill="#000000"/>'
+        '<polygon points="50,5 50,40 70,45" fill="#666666"/>'
+        "</svg>"
+    ),
+}
+
+
 # --- Page sizes in millimetres (QGIS's print layout uses mm) --------
 
 PAGE_SIZES_MM: dict[str, tuple[float, float]] = {
@@ -26,6 +70,9 @@ PAGE_SIZES_MM: dict[str, tuple[float, float]] = {
     "Letter_portrait": (215.9, 279.4),
     "Letter_landscape": (279.4, 215.9),
     "16_9_landscape": (297.0, 167.0),  # ~ 16:9 of A4 width
+    "square_180": (180.0, 180.0),  # square format (Instagram / social media)
+    "A1_landscape": (841.0, 594.0),  # large-format drawing sheet
+    "A1_portrait": (594.0, 841.0),
 }
 
 
@@ -148,6 +195,107 @@ DEFAULT_TEMPLATES: dict[str, PrintTemplate] = {
         include_north_arrow=True,
         include_grid=False,
         notes="A4 landscape, title + map + scale bar + north arrow only.",
+    ),
+    "screen_fullhd": PrintTemplate(
+        name="screen_fullhd",
+        page="16_9_landscape",
+        palette=[
+            "#2c3e50",
+            "#3498db",
+            "#e74c3c",
+            "#f39c12",
+            "#27ae60",
+            "#9b59b6",
+            "#1abc9c",
+            "#34495e",
+        ],
+        primary_color="#2c3e50",
+        secondary_color="#7f8c8d",
+        background="#ffffff",
+        font_family="DejaVu Sans",
+        mono_family="DejaVu Sans Mono",
+        title_size=14.0,
+        subtitle_size=7.0,
+        margin_mm=8.0,
+        include_legend=True,
+        include_scale_bar=False,
+        include_north_arrow=True,
+        include_grid=False,
+        notes="16:9 FullHD 1080p screen map. Big title, no scale bar. Ideal for web/screen use.",
+    ),
+    "instagram_square": PrintTemplate(
+        name="instagram_square",
+        page="square_180",
+        palette=[
+            "#1a1a2e",
+            "#e94560",
+            "#16213e",
+            "#0f3460",
+            "#533483",
+        ],
+        primary_color="#ffffff",
+        secondary_color="#cccccc",
+        background="#1a1a2e",
+        font_family="DejaVu Sans",
+        mono_family="DejaVu Sans Mono",
+        title_size=10.0,
+        subtitle_size=5.0,
+        margin_mm=6.0,
+        include_legend=False,
+        include_scale_bar=False,
+        include_north_arrow=True,
+        include_grid=False,
+        notes="180x180mm square, dark background. Social-media-friendly. North arrow only, no legend or scale bar.",
+    ),
+    "index_a4": PrintTemplate(
+        name="index_a4",
+        page="A4_portrait",
+        palette=[
+            "#404040",
+            "#808080",
+            "#bfbfbf",
+            "#e0e0e0",
+            "#ffffff",
+        ],
+        primary_color="#1a1a1a",
+        secondary_color="#595959",
+        background="#ffffff",
+        font_family="DejaVu Sans",
+        mono_family="DejaVu Sans Mono",
+        title_size=7.0,
+        subtitle_size=4.0,
+        margin_mm=10.0,
+        include_legend=True,
+        include_scale_bar=True,
+        include_north_arrow=True,
+        include_grid=True,
+        include_atlas=True,
+        notes="A4 portrait with index grid overlay. Grid enabled by default. Suitable for atlas / overview maps.",
+    ),
+    "drawing_a1": PrintTemplate(
+        name="drawing_a1",
+        page="A1_landscape",
+        palette=[
+            "#000000",
+            "#404040",
+            "#808080",
+            "#cccccc",
+            "#ffffff",
+        ],
+        primary_color="#000000",
+        secondary_color="#404040",
+        background="#ffffff",
+        font_family="Liberation Sans",
+        mono_family="Liberation Mono",
+        title_size=10.0,
+        subtitle_size=6.0,
+        margin_mm=20.0,
+        include_legend=True,
+        include_scale_bar=True,
+        include_north_arrow=True,
+        include_grid=True,
+        metadata_block=True,
+        notes="A1 landscape large-format drawing. Generous 20mm margins, metadata block, grid enabled. Ideal for engineering / cadastral plans.",
     ),
 }
 
@@ -273,6 +421,7 @@ __all__ = [
     "SymbolDefaults",
     "VerifierLimits",
     "VERIFIER_LIMITS",
+    "NORTH_ARROW_SVGS",
     "get_template",
     "get_symbol_defaults",
     "template_to_dict",

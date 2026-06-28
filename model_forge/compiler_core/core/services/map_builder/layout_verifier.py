@@ -852,6 +852,55 @@ def _legend_below_map(spec: LayoutSpec) -> list[Violation]:
     return []
 
 
+@_spec_rule("map_zone.grid_interval_reasonable")
+def _grid_interval_reasonable(spec: LayoutSpec) -> list[Violation]:
+    """When a grid is enabled with explicit intervals, check they
+    are reasonable for the map extent. Intervals wider than the
+    extent produce a single grid line -- useless.
+    """
+    grid = spec.map.grid_spec
+    if grid is None or not grid.enabled:
+        return []
+    if grid.interval_x is None and grid.interval_y is None:
+        return []
+    extent = spec.map.extent
+    if extent is None:
+        return []
+    xmin, ymin, xmax, ymax = extent
+    extent_w = xmax - xmin
+    extent_h = ymax - ymin
+    if extent_w <= 0 or extent_h <= 0:
+        return []
+    violations: list[Violation] = []
+    if grid.interval_x is not None and grid.interval_x > extent_w:
+        violations.append(
+            Violation(
+                code="E_GRID_INTERVAL_TOO_LARGE",
+                message=(
+                    f"Grid interval X ({grid.interval_x}) is larger than the "
+                    f"extent width ({extent_w:.2f}). Grid will have 0-1 lines."
+                ),
+                severity="warning",
+                rule="map_zone.grid_interval_reasonable",
+                item_id="map",
+            )
+        )
+    if grid.interval_y is not None and grid.interval_y > extent_h:
+        violations.append(
+            Violation(
+                code="E_GRID_INTERVAL_TOO_LARGE",
+                message=(
+                    f"Grid interval Y ({grid.interval_y}) is larger than the "
+                    f"extent height ({extent_h:.2f}). Grid will have 0-1 lines."
+                ),
+                severity="warning",
+                rule="map_zone.grid_interval_reasonable",
+                item_id="map",
+            )
+        )
+    return violations
+
+
 @_spec_rule("ancillaries.north_arrow_upper_left")
 def _north_arrow_upper_left(spec: LayoutSpec) -> list[Violation]:
     """North arrow should sit in the map's upper-LEFT quadrant

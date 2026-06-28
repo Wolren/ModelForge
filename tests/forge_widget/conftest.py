@@ -189,6 +189,13 @@ def _stub_qgis(monkeypatch: pytest.MonkeyPatch) -> None:
             "setPicturePath": lambda *a, **k: None,
             "addLayoutItem": lambda *a, **k: None,
             "applyDefaultSettings": lambda *a, **k: None,
+            "zoomToExtent": lambda *a, **k: None,
+            "setCrs": lambda *a, **k: None,
+            "setFrameStrokeWidth": lambda *a, **k: None,
+            "setLinkedMap": lambda *a, **k: None,
+            "refresh": lambda *a, **k: None,
+            "update": lambda *a, **k: None,
+            "adjustBoxSize": lambda *a, **k: None,
             "setAutoUpdateModel": lambda *a, **k: None,
             "modelRootGroup": lambda *a, **k: type(
                 "_RG",
@@ -211,6 +218,42 @@ def _stub_qgis(monkeypatch: pytest.MonkeyPatch) -> None:
     core.QgsLayoutSize = type("QgsLayoutSize", (), {"__init__": lambda *a, **k: None})  # type: ignore[attr-defined]
     core.QgsUnitTypes = type("QgsUnitTypes", (), {"LayoutMillimeters": 0})  # type: ignore[attr-defined]
     core.QgsLayerTreeLayer = type("QgsLayerTreeLayer", (), {"__init__": lambda *a, **k: None})  # type: ignore[attr-defined]
+    core.QgsFillSymbol = type(
+        "QgsFillSymbol", (), {"createSimple": staticmethod(lambda *a, **k: None)}
+    )  # type: ignore[attr-defined]
+    core.QgsLayoutItemShape = type(
+        "QgsLayoutItemShape",
+        (),
+        {
+            "__init__": lambda *a, **k: None,
+            "setShapeType": lambda *a, **k: None,
+            "setSymbol": lambda *a, **k: None,
+            "Rectangle": 0,
+            "attemptMove": lambda *a, **k: None,
+            "attemptResize": lambda *a, **k: None,
+        },
+    )  # type: ignore[attr-defined]
+    core.QgsCoordinateReferenceSystem = type(
+        "QgsCoordinateReferenceSystem", (), {"__init__": lambda *a, **k: None}
+    )  # type: ignore[attr-defined]
+    core.QgsCoordinateTransform = type(
+        "QgsCoordinateTransform", (), {"__init__": lambda *a, **k: None}
+    )  # type: ignore[attr-defined]
+    core.QgsLayoutItemMapGrid = type(
+        "QgsLayoutItemMapGrid",
+        (),
+        {
+            "__init__": lambda *a, **k: None,
+            "setEnabled": lambda *a, **k: None,
+            "setCrs": lambda *a, **k: None,
+            "setIntervalX": lambda *a, **k: None,
+            "setIntervalY": lambda *a, **k: None,
+            "setAnnotationEnabled": lambda *a, **k: None,
+            "setAnnotationFont": lambda *a, **k: None,
+            "setAnnotationFormat": lambda *a, **k: None,
+            "DecimalWithSuffix": 0,
+        },
+    )  # type: ignore[attr-defined]
 
     pyqt.QtCore = qtcore
     pyqt.QtWidgets = qtwidgets
