@@ -31,8 +31,7 @@ class IRValidator:
 
             # Check child_output references point to existing steps
             for pname, binding in step.parameters.items():
-                if binding.source_type == "child_output":
-                    if binding.child_id and binding.child_id not in step_ids:
+                if binding.source_type == "child_output" and binding.child_id and binding.child_id not in step_ids:
                         plan.issues.append(
                             PlanIssue(
                                 level=IssueLevel.ERROR,

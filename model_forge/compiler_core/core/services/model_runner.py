@@ -228,7 +228,7 @@ def _mark_cancelled(results: dict[str, StepResult]) -> None:
             r.status = "cancelled"
 
 
-class _Cancelled(Exception):
+class _Cancelled(Exception):  # noqa: N818
     """Internal sentinel; not exported."""
 
 
@@ -368,7 +368,7 @@ def _idempotency_key(alg: dict[str, Any], inputs: dict[str, Any]) -> str:
     """
     alg_id = str(alg.get("algorithm_id", "") or "")
     inputs_json = json.dumps(inputs, sort_keys=True, default=str)
-    digest = hashlib.sha256(f"{alg_id}\n{inputs_json}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{alg_id}\n{inputs_json}".encode()).hexdigest()
     return f"{alg_id}:{digest[:16]}"
 
 

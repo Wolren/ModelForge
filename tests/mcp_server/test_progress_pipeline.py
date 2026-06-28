@@ -13,7 +13,6 @@ import pytest
 
 from model_forge.mcp_server import jobs
 
-
 # ─── Fakes ─────────────────────────────────────────────────────────────
 
 

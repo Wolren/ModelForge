@@ -230,10 +230,7 @@ class ForgeGenerateWorker(QThread):
 
         algorithms = full_context.get("algorithms", {})
         algo_items = list(algorithms.items())
-        if attempt == 1:
-            limit = min(len(algo_items), 40)
-        else:
-            limit = min(len(algo_items), 20)
+        limit = min(len(algo_items), 40) if attempt == 1 else min(len(algo_items), 20)
         slim_algorithms = dict(algo_items[:limit])
 
         return {

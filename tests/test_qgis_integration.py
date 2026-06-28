@@ -1,10 +1,11 @@
+# ruff: noqa: E402
 """
 Model Forge QGIS Integration Test
 Run this from QGIS Python Console:  exec(open(r'PATH/TO/test_qgis_integration.py').read())
 Or save as Processing script and run from toolbox.
 """
 
-import sys, os
+import sys
 
 try:
     import qgis.core  # noqa: F401
@@ -25,35 +26,28 @@ def section(title):
 
 # --- 1. Imports ---
 section("1. Import all modules")
-from qgis.core import QgsApplication, Qgis
+from qgis.core import Qgis, QgsApplication
 
 print(f"QGIS version: {Qgis.QGIS_VERSION}")
 reg = QgsApplication.processingRegistry()
 providers = [(p.id(), p.name()) for p in reg.providers()]
 print(f"Providers ({len(providers)}): {providers}")
 
+from model_forge.compiler_core.core.compiler.algorithm_resolver import AlgorithmResolver
+from model_forge.compiler_core.core.compiler.ir_validator import IRValidator
+from model_forge.compiler_core.core.compiler.link_repair import LinkRepairService
+from model_forge.compiler_core.core.compiler.model_emitter import ModelEmitter
+from model_forge.compiler_core.core.context_collector import ContextCollector
 from model_forge.compiler_core.core.ir import (
     ExecutablePlan,
     ExecutableStep,
-    ParameterBinding,
-    StepStatus,
-    ResolvedAlgorithm,
-    ParameterSpec,
-    OutputSpec,
     ModelInput,
+    ParameterBinding,
     ParamKind,
-    OutputKind,
+    ResolvedAlgorithm,
+    StepStatus,
 )
-from model_forge.compiler_core.core.compiler.link_repair import LinkRepairService
-from model_forge.compiler_core.core.compiler.algorithm_resolver import AlgorithmResolver
-from model_forge.compiler_core.core.compiler.model_emitter import ModelEmitter
-from model_forge.compiler_core.core.compiler.ir_validator import IRValidator
-from model_forge.compiler_core.core.compiler.intent_parser import IntentParser
-from model_forge.compiler_core.core.compiler.semantic_planner import SemanticPlanner
-from model_forge.compiler_core.core.compiler.expression_validator import ExpressionValidator
-from model_forge.compiler_core.core.compiler.pipeline import CompilerPipeline
 from model_forge.compiler_core.core.services.registry.registry_catalog import RegistryCatalogService
-from model_forge.compiler_core.core.context_collector import ContextCollector
 
 print("  ✓ All imports OK")
 
@@ -252,12 +246,12 @@ for alg in result.get("algorithms", []):
     for pname, pval in alg.get("parameters", {}).items():
         if pval.get("value") is None and pval.get("type") == "static":
             nulls.append((alg.get("id"), pname))
-print(f"  Null static values: {'none ✓' if not nulls else nulls}")
+print(f"  Null static values: {nulls if nulls else 'none ✓'}")
 inputs_ok = all(
     inp.get("default") is not None or "default" in inp for inp in result.get("inputs", [])
 )
 print(f"  Input defaults: {'✓' if inputs_ok else '✗'}")
 
 print(f"\n{'=' * 60}")
-print(f"ALL INTEGRATION TESTS COMPLETE")
+print("ALL INTEGRATION TESTS COMPLETE")
 print(f"{'=' * 60}")

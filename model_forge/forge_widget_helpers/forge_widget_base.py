@@ -13,17 +13,9 @@ import os
 import re
 import sys
 
-log = logging.getLogger(__name__)
-
 from qgis.core import QgsProject
 from qgis.PyQt.QtCore import QSettings, Qt, QThread, pyqtSignal
 from qgis.PyQt.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
-
-from model_forge.compiler_core.core.services.secure_storage import (
-    delete_api_key,
-    get_api_key,
-    set_api_key,
-)
 from qgis.PyQt.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -50,9 +42,15 @@ from qgis.PyQt.QtWidgets import (
 
 from model_forge.compiler_core.core.context_collector import ContextCollector
 from model_forge.compiler_core.core.services.mermaid_renderer import to_mermaid
+from model_forge.compiler_core.core.services.secure_storage import (
+    get_api_key,
+    set_api_key,
+)
 from model_forge.compiler_core.ui.model_builder_bridge import ModelBuilderBridge
 from model_forge.legacy_base.llm_backend import LLMBackend
 from model_forge.legacy_base.model_layout import compute_layout
+
+log = logging.getLogger(__name__)
 
 SETTINGS_PREFIX = "ModelForge/"
 
@@ -712,10 +710,10 @@ class ForgeWidget(QWidget):
         for pid, w in self._provider_widgets.items():
             enabled = s.value(f"{pid}/enabled")
             if enabled is not None:
-                try:
+                import contextlib
+
+                with contextlib.suppress(Exception):
                     w["chk"].setChecked(str(enabled).lower() == "true")
-                except Exception:
-                    pass
         s.endGroup()
 
     def _load_settings(self):
@@ -740,10 +738,10 @@ class ForgeWidget(QWidget):
             self.txt_model.setText(model)
         temp = s.value(SETTINGS_PREFIX + "temperature")
         if temp is not None:
-            try:
+            import contextlib
+
+            with contextlib.suppress(ValueError, TypeError):
                 self.sld_temperature.setValue(int(float(temp) * 10))
-            except (ValueError, TypeError):
-                pass
         self._restore_provider_settings()
 
     def _save_settings(self):
@@ -940,7 +938,7 @@ class ForgeWidget(QWidget):
                 open_designer=False,
             )
 
-            tmp = tempfile.NamedTemporaryFile(suffix=".model3", delete=False)
+            tmp = tempfile.NamedTemporaryFile(suffix=".model3", delete=False)  # noqa: SIM115 - need delete=False, context manager would clean up before use
             tmp_path = tmp.name
             tmp.close()
 
@@ -954,10 +952,10 @@ class ForgeWidget(QWidget):
                 file_model = QgsProcessingModelAlgorithm()
                 file_model.fromFile(tmp_path)
             finally:
-                try:
+                import contextlib
+
+                with contextlib.suppress(OSError):
                     os.unlink(tmp_path)
-                except OSError:
-                    pass
 
             dlg = ModelerDialog(file_model)
             dlg.show()

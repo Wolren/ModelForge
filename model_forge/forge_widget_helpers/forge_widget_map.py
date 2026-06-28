@@ -27,11 +27,25 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import traceback
 from typing import Any
 
-from qgis.PyQt.QtCore import QThread, Qt
+from qgis.PyQt.QtCore import Qt, QThread
+from qgis.PyQt.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPlainTextEdit,
+    QProgressBar,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 
 def _log(msg: str) -> None:
@@ -46,23 +60,6 @@ def _log(msg: str) -> None:
         QgsMessageLog.logMessage(str(msg), "MapForge", notifyUser=False)
     except Exception:  # noqa: BLE001
         pass
-
-
-from qgis.PyQt.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QSpinBox,
-    QHBoxLayout,
-    QLabel,
-    QListWidget,
-    QListWidgetItem,
-    QMessageBox,
-    QPlainTextEdit,
-    QProgressBar,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
 
 
 # ── Helpers ──────────────────────────────────────────────
@@ -410,10 +407,10 @@ class ForgeWidgetMapMixin:
         # hasn't finished loading layers yet — the deferred
         # call picks them up without us having to know
         # when QGIS is "ready".
-        try:
+        import contextlib
+
+        with contextlib.suppress(Exception):
             self._refresh_layer_picker()
-        except Exception:  # noqa: BLE001
-            pass
         try:
             from qgis.PyQt.QtCore import QTimer
 
@@ -1034,10 +1031,7 @@ class ForgeWidgetMapMixin:
         # user can deselect to exclude. This way the dock
         # produces a map out-of-the-box without the user
         # having to tick anything.
-        if prev_selection:
-            pre_select = True  # any layer that was previously selected stays selected
-        else:
-            pre_select = True  # default: all visible layers pre-selected
+        pre_select = True
         for layer in layers:
             try:
                 if layer.type() == layer.RasterLayer:
@@ -1077,7 +1071,6 @@ class ForgeWidgetMapMixin:
                 for i in range(total)
                 if self.lst_map_layers.item(i).isSelected()
             ]
-        n_sel = len(selected)
         # Distinct selected ids (skip items with no data).
         distinct = sum(1 for it in selected if it.data(Qt.UserRole))
         self.lbl_map_picker_state.setText(f"Layers: {distinct} of {total} selected")
@@ -1276,9 +1269,9 @@ class ForgeWidgetMapMixin:
         lines.append(f"Layers: {len(picked)} shown")
         # Build quick bounds from the model_json extent
         lines.append(f"Map: extent from model ({len(model_json.get('algorithms', []))} steps)")
-        lines.append(f"North arrow: upper-left, 15x15mm framed")
-        lines.append(f"Scale bar: lower-left, 60x8mm single-box, 3 segments")
-        lines.append(f"Legend: footer strip, 190x40mm")
+        lines.append("North arrow: upper-left, 15x15mm framed")
+        lines.append("Scale bar: lower-left, 60x8mm single-box, 3 segments")
+        lines.append("Legend: footer strip, 190x40mm")
         # Verifier info
         v_items = [
             self.lst_map_verifier.item(i).text() for i in range(self.lst_map_verifier.count())
@@ -1829,10 +1822,10 @@ class ForgeWidgetMapMixin:
         # Fallback: last layout in the manager.
         layouts = proj.layoutManager().layouts()
         if layouts:
-            try:
+            import contextlib
+
+            with contextlib.suppress(Exception):
                 iface.openLayoutDesigner(layouts[-1])
-            except Exception:  # noqa: BLE001
-                pass
 
     def _layout_path(self, model_json: dict, template: str) -> str:
         from qgis.core import QgsProject
@@ -1866,17 +1859,17 @@ class ForgeWidgetMapMixin:
         _log(f"_apply_layout_to_project: qpt_path={qpt_path} title={title!r} template={template!r}")
         try:
             from qgis.core import (
-                QgsLayoutItemMap,
                 QgsLayoutItemLabel,
                 QgsLayoutItemLegend,
-                QgsLayoutItemScaleBar,
+                QgsLayoutItemMap,
                 QgsLayoutItemPicture,
+                QgsLayoutItemScaleBar,
                 QgsLayoutPoint,
                 QgsLayoutSize,
                 QgsPrintLayout,
                 QgsProject,
-                QgsUnitTypes,
                 QgsRectangle,
+                QgsUnitTypes,
             )
         except ImportError as e:
             raise RuntimeError("QGIS Python bindings unavailable; cannot create layout.") from e
@@ -1907,10 +1900,10 @@ class ForgeWidgetMapMixin:
         # Map item — following the reference plugin pattern:
         # 1. Set CRS 2. Add to layout 3. Zoom to extent 4. Configure frame
         map_item = QgsLayoutItemMap(layout)
-        try:
+        import contextlib
+
+        with contextlib.suppress(Exception):
             map_item.setCrs(QgsProject.instance().crs())
-        except Exception:  # noqa: BLE001
-            pass
         map_item.attemptMove(QgsLayoutPoint(10, 25, QgsUnitTypes.LayoutMillimeters))
         map_item.attemptResize(QgsLayoutSize(190, 190, QgsUnitTypes.LayoutMillimeters))
         layout.addLayoutItem(map_item)  # add before setting extent
@@ -1954,7 +1947,6 @@ class ForgeWidgetMapMixin:
         try:
             from qgis.core import (
                 QgsCoordinateReferenceSystem,
-                QgsCoordinateTransform,
                 QgsLayoutItemMapGrid,
             )
 
@@ -1965,10 +1957,10 @@ class ForgeWidgetMapMixin:
             grid.setIntervalY(0.5)
             grid.setAnnotationEnabled(True)
             grid.setAnnotationFont(QFont("Arial", 6))
-            try:
+            import contextlib
+
+            with contextlib.suppress(Exception):
                 grid.setAnnotationFormat(QgsLayoutItemMapGrid.DecimalWithSuffix)
-            except Exception:  # noqa: BLE001
-                pass
             map_item.grids().addGrid(grid)
         except Exception:  # noqa: BLE001
             pass
@@ -1985,7 +1977,7 @@ class ForgeWidgetMapMixin:
             if layer_meta:
                 from qgis.core import QgsLayerTreeLayer
 
-                for lid, meta in layer_meta.items():
+                for lid, _meta in layer_meta.items():
                     ql = proj.mapLayer(lid)
                     if ql is not None:
                         root.addChildNode(QgsLayerTreeLayer(ql))
@@ -2153,8 +2145,8 @@ class ForgeWidgetMapMixin:
         try:
             from qgis.core import (
                 QgsProject,
-                QgsVectorLayer,
-                QgsRasterLayer,
+                QgsRasterLayer,  # noqa: F401
+                QgsVectorLayer,  # noqa: F401
             )
         except ImportError:
             return 0

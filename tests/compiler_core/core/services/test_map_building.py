@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 import pytest
 
 from model_forge.compiler_core.core.services.map_builder import (
@@ -11,7 +10,6 @@ from model_forge.compiler_core.core.services.map_builder import (
     qpt_builder,
     style_templates,
 )
-
 
 # --- style_templates ------------------------------------------------
 

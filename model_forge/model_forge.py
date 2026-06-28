@@ -104,7 +104,7 @@ class ModelForge:
             try:
                 self.register_generated_step(mod_path, module_name=mod_name)
             except Exception as e:
-                warnings.warn(f"ModelForge: failed to register user step {fname}: {e}")
+                warnings.warn(f"ModelForge: failed to register user step {fname}: {e}", stacklevel=2)
 
     def register_generated_step(self, py_path, module_name=None):
         if not _HAS_QGIS:

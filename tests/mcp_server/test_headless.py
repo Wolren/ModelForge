@@ -10,10 +10,10 @@ from model_forge.mcp_server import server as server_mod
 @pytest.fixture
 def fresh_state(monkeypatch):
     """Build a fresh ServerState and a fresh subscriptions registry."""
+    from model_forge.mcp_server.jobs import reset_registry as reset_jobs
     from model_forge.mcp_server.subscriptions import (
         reset_subscription_registry,
     )
-    from model_forge.mcp_server.jobs import reset_registry as reset_jobs
 
     reset_subscription_registry()
     reset_jobs()

@@ -780,7 +780,7 @@ def _model_output_schema(model: dict) -> dict[str, list[tuple[str, int]]]:
             continue
         # Heuristic: any input param that points to a model_input is the
         # schema source. We take the first one and use its fields.
-        for pname, pval in (alg.get("parameters") or {}).items():
+        for _pname, pval in (alg.get("parameters") or {}).items():
             if not isinstance(pval, dict):
                 continue
             if pval.get("type") == "model_input":
@@ -1123,6 +1123,8 @@ def _register_generation_tools(mcp: FastMCP) -> None:
         # using that id).
         from .jobs import (
             CancelledError as JobCancelled,
+        )
+        from .jobs import (
             MfTimeoutError,
             get_registry,
         )
@@ -1345,8 +1347,8 @@ def _register_generation_tools(mcp: FastMCP) -> None:
                     with open(path, encoding="utf-8") as f:
                         content = f.read()
                 finally:
-                    import os as _os
                     import contextlib
+                    import os as _os
 
                     with contextlib.suppress(OSError):
                         _os.unlink(tmp_path)
@@ -1505,8 +1507,8 @@ def _register_generation_tools(mcp: FastMCP) -> None:
                     with open(raw_path, encoding="utf-8") as f:
                         raw_body = f.read()
                 finally:
-                    import os as _os
                     import contextlib
+                    import os as _os
 
                     with contextlib.suppress(OSError):
                         _os.unlink(raw_path)
@@ -1670,10 +1672,10 @@ def _register_map_tools(mcp: FastMCP) -> None:
         verify: bool = True,
     ) -> str:
         try:
-            from model_forge.compiler_core.core.services.map_builder.qpt_builder import build_qpt
             from model_forge.compiler_core.core.services.map_builder.layout_verifier import (
                 verify_qpt,
             )
+            from model_forge.compiler_core.core.services.map_builder.qpt_builder import build_qpt
         except ImportError as e:
             return error_response_json(
                 ConfigError(
@@ -1683,7 +1685,7 @@ def _register_map_tools(mcp: FastMCP) -> None:
             )
 
         try:
-            model = _model_json_from_str(model_json_str)
+            _model_json_from_str(model_json_str)
         except json.JSONDecodeError as e:
             return error_response_json(
                 InvalidJSONError(
@@ -1796,7 +1798,7 @@ def _register_map_tools(mcp: FastMCP) -> None:
             )
         try:
             from qgis.core import (
-                QgsApplication,
+                QgsApplication,  # noqa: F401
                 QgsLayoutExporter,
                 QgsPrintLayout,
                 QgsProject,
@@ -2277,7 +2279,7 @@ def create_server(state: ServerState | None = None) -> FastMCP:
     @mcp.resource("model-forge://server-info")
     def resource_server_info() -> str:
         state = _get_state()
-        from .subscriptions import SUBSCRIBE_CAPABILITIES, SUBSCRIBABLE_URIS
+        from .subscriptions import SUBSCRIBABLE_URIS, SUBSCRIBE_CAPABILITIES
 
         return json.dumps(
             {

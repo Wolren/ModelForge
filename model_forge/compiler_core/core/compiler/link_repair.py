@@ -20,14 +20,14 @@ import logging
 import re
 from typing import Any
 
-log = logging.getLogger(__name__)
-
 from ..ir import (
     ExecutablePlan,
     IssueLevel,
     ParameterBinding,
     PlanIssue,
 )
+
+log = logging.getLogger(__name__)
 
 _QGIS_OUTPUT_TYPE_MAP: dict[int, str] = {
     0: "vector",

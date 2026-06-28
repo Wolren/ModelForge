@@ -209,7 +209,7 @@ The layout description includes:
 - Layer count
 - Map position / size / extent
 - Legend position / size
-- Scale bar position / size  
+- Scale bar position / size
 - North arrow position / size
 - Grid configuration (if enabled)
 
@@ -217,7 +217,7 @@ CRITICAL RULES:
 - Legend must sit below the map, not overlaying it
 - Scale bar and north arrow must have frame+background enabled
 - North arrow in upper-left of the map area
-- Scale bar in lower-left of the map area  
+- Scale bar in lower-left of the map area
 - At most 12 layers in the legend (pick the most relevant)
 - No overlapping items
 - Title at the top, subtitle below it
@@ -773,7 +773,7 @@ class LLMBackend:
                 except Exception:
                     log.warning("Failed to decode error body from HTTP %s", e.code)
                     error_body = ""
-                raise ValueError("HTTP Error " + str(e.code) + ": " + error_body)
+                raise ValueError("HTTP Error " + str(e.code) + ": " + error_body) from e
 
             except urllib.error.URLError as e:
                 last_error = e
@@ -781,7 +781,7 @@ class LLMBackend:
                     time.sleep(backoff)
                     backoff *= 2
                     continue
-                raise ValueError("Connection error: " + str(e.reason))
+                raise ValueError("Connection error: " + str(e.reason)) from e
 
             except ValueError:
                 raise
@@ -792,7 +792,7 @@ class LLMBackend:
                     time.sleep(backoff)
                     backoff *= 2
                     continue
-                raise ValueError("Error calling LLM API: " + str(e))
+                raise ValueError("Error calling LLM API: " + str(e)) from e
 
         raise ValueError("LLM API failed after " + str(attempts) + " retries: " + str(last_error))
 
@@ -808,7 +808,7 @@ class LLMBackend:
         # 0) Strip markdown/code fences
         if text.startswith("```"):
             lines = text.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
+            lines = [line for line in lines if not line.strip().startswith("```")]
             text = "\n".join(lines).strip()
 
         # 1) Fast path

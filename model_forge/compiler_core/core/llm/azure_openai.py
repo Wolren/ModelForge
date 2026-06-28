@@ -28,7 +28,6 @@ from typing import Any
 
 from .openai import OpenAILLMBackend
 
-
 # Default api-version pinned to a stable 2024-08 release. Azure
 # rotates these; users can override via the ``extra_body`` key
 # ``api_version`` (handled in :meth:`_build_url`) or via

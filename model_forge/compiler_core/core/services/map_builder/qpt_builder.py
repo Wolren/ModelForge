@@ -42,7 +42,6 @@ from .style_templates import (
     get_template,
 )
 
-
 # --- Item types -----------------------------------------------------
 
 
@@ -738,7 +737,7 @@ def parse_qpt(xml: str) -> dict[str, Any]:
             # Some QGIS versions wrap layers in <LayerSet>.
             for c in child:
                 if c.tag == "LayerSet":
-                    layers = [l.attrib.get("id") for l in c if l.tag == "Layer"]
+                    layers = [layer.attrib.get("id") for layer in c if layer.tag == "Layer"]
         if layers:
             d["layers"] = layers
         extent_el = next((c for c in child if c.tag == "Extent"), None)

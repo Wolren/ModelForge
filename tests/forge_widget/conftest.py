@@ -115,7 +115,7 @@ def _stub_qgis(monkeypatch: pytest.MonkeyPatch) -> None:
     # as an attribute of ``Qt``; the stub mirrors that.
     class _Qt:
         red = object()  # sentinel - the value doesn't matter for the stub
-        darkGreen = object()  # same for diagnostic items
+        darkGreen = object()  # noqa: N815 - same for diagnostic items
 
     qtcore.Qt = _Qt
     qtcore.QThread = type("QThread", (), {})
@@ -192,7 +192,6 @@ def _stub_qgis(monkeypatch: pytest.MonkeyPatch) -> None:
             "zoomToExtent": lambda *a, **k: None,
             "setCrs": lambda *a, **k: None,
             "setFrameStrokeWidth": lambda *a, **k: None,
-            "setLinkedMap": lambda *a, **k: None,
             "refresh": lambda *a, **k: None,
             "update": lambda *a, **k: None,
             "adjustBoxSize": lambda *a, **k: None,

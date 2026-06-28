@@ -7,23 +7,21 @@ import sys
 
 sys.path.insert(0, ".")
 
+from model_forge.compiler_core.core.compiler.algorithm_resolver import AlgorithmResolver
+from model_forge.compiler_core.core.compiler.link_repair import LinkRepairService
+from model_forge.compiler_core.core.compiler.model_emitter import ModelEmitter
 from model_forge.compiler_core.core.ir import (
     ExecutablePlan,
     ExecutableStep,
-    ParameterBinding,
-    StepStatus,
-    IssueLevel,
-    PlanIssue,
-    ResolvedAlgorithm,
-    ParameterSpec,
-    OutputSpec,
     ModelInput,
-    ParamKind,
     OutputKind,
+    OutputSpec,
+    ParameterBinding,
+    ParameterSpec,
+    ParamKind,
+    ResolvedAlgorithm,
+    StepStatus,
 )
-from model_forge.compiler_core.core.compiler.link_repair import LinkRepairService
-from model_forge.compiler_core.core.compiler.algorithm_resolver import AlgorithmResolver
-from model_forge.compiler_core.core.compiler.model_emitter import ModelEmitter
 
 
 def test_alias_resolution():
@@ -151,7 +149,7 @@ def test_model_emitter_none_hardening():
     for inp in result["inputs"]:
         assert inp.get("default") is not None or "default" in inp
     for alg in result["algorithms"]:
-        for pname, pval in alg["parameters"].items():
+        for _pname, pval in alg["parameters"].items():
             v = pval.get("value")
             if v is None and pval["type"] != "static":
                 pass  # model_input/child_output don't need value

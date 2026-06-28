@@ -575,10 +575,10 @@ def _page_aspect_ratio(spec: LayoutSpec) -> list[Violation]:
     that as a warning so the LLM knows the layout is using a
     non-standard size.
     """
-    from .pipeline import PAGE_SIZES_MM as _  # noqa: F401  (avoid circular)
+    from .pipeline import PAGE_SIZES_MM as _  # noqa: F401, N811  (avoid circular)
     from .style_templates import PAGE_SIZES_MM
 
-    for key, (w, h) in PAGE_SIZES_MM.items():
+    for _key, (w, h) in PAGE_SIZES_MM.items():
         if abs(w - spec.page.width_mm) < 0.01 and abs(h - spec.page.height_mm) < 0.01:
             return []
     return [
@@ -724,7 +724,7 @@ def _map_within_margins(spec: LayoutSpec) -> list[Violation]:
         return [
             Violation(
                 code="E_MAP_OUT_OF_MARGIN_RIGHT",
-                message=f"Map right edge exceeds the right margin.",
+                message="Map right edge exceeds the right margin.",
                 rule="map_zone.map_within_margins",
             )
         ]
@@ -732,7 +732,7 @@ def _map_within_margins(spec: LayoutSpec) -> list[Violation]:
         return [
             Violation(
                 code="E_MAP_OUT_OF_MARGIN_BOTTOM",
-                message=f"Map bottom edge exceeds the bottom margin.",
+                message="Map bottom edge exceeds the bottom margin.",
                 rule="map_zone.map_within_margins",
             )
         ]

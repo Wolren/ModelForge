@@ -137,12 +137,12 @@ def export_to_processing_script(
         params_block = ",\n            ".join(params_strs)
         lines.append(f"        {safe_var} = processing.run(")
         lines.append(f"            '{alg_id}',")
-        lines.append(f"            {{")
+        lines.append("            {")
         lines.append(f"            {params_block}")
-        lines.append(f"            }},")
-        lines.append(f"            context=context,")
-        lines.append(f"            feedback=feedback,")
-        lines.append(f"        )[0]")
+        lines.append("            },")
+        lines.append("            context=context,")
+        lines.append("            feedback=feedback,")
+        lines.append("        )[0]")
         lines.append("")
 
     if return_items:

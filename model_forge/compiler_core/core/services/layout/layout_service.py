@@ -39,7 +39,7 @@ class GraphLayoutService:
         ranks = self._assign_ranks(step_ids, dep_map)
 
         y_cursor = cfg.input_x
-        for i, inp in enumerate(plan.inputs):
+        for _i, inp in enumerate(plan.inputs):
             inp.pos_x = cfg.input_x
             inp.pos_y = y_cursor
             y_cursor += self._plan_node_span(inp.label, cfg)
@@ -359,7 +359,7 @@ class GraphLayoutService:
         for alg in algorithms:
             alg_id = alg.get("id", "")
             params = alg.get("parameters", {})
-            for pname, pbind in params.items():
+            for _pname, pbind in params.items():
                 if isinstance(pbind, dict) and pbind.get("type") == "child_output":
                     src = pbind.get("child_id", "")
                     if src:

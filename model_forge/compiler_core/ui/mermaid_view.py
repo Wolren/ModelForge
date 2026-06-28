@@ -6,8 +6,8 @@ display so the user at least sees the diagram code.
 
 from __future__ import annotations
 
-import os
 import logging
+import os
 
 from qgis.PyQt.QtCore import QUrl
 from qgis.PyQt.QtWidgets import QPlainTextEdit, QVBoxLayout, QWidget

@@ -8,12 +8,10 @@ passes the spec-level verifier.
 
 from __future__ import annotations
 
-
 from model_forge.compiler_core.core.services.map_builder import (
     layout_verifier,
     pipeline,
 )
-
 
 # --- Profiles ----------------------------------------------------
 

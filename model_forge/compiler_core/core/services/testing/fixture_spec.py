@@ -13,18 +13,18 @@ from dataclasses import dataclass, field
 from typing import Any
 
 try:
-    import processing
+    import processing  # noqa: F401
     from qgis.core import (
-        QgsCoordinateReferenceSystem,
-        QgsFeature,
-        QgsField,
-        QgsFields,
-        QgsGeometry,
-        QgsProcessingContext,
-        QgsProcessingException,
-        QgsProcessingFeedback,
-        QgsVectorLayer,
-        QgsWkbTypes,
+        QgsCoordinateReferenceSystem,  # noqa: F401
+        QgsFeature,  # noqa: F401
+        QgsField,  # noqa: F401
+        QgsFields,  # noqa: F401
+        QgsGeometry,  # noqa: F401
+        QgsProcessingContext,  # noqa: F401
+        QgsProcessingException,  # noqa: F401
+        QgsProcessingFeedback,  # noqa: F401
+        QgsVectorLayer,  # noqa: F401
+        QgsWkbTypes,  # noqa: F401
     )
 
     _HAS_QGIS = True
@@ -111,10 +111,7 @@ class FixtureGeneratorService:
         return {}
 
     def _step_accepts_geometry(self, step) -> bool:
-        for p in step.parameters.values():
-            if "vector" in str(p.source_type).lower():
-                return True
-        return False
+        return any("vector" in str(p.source_type).lower() for p in step.parameters.values())
 
     def save_suite(self, suite: TestSuite, path: str):
         import json

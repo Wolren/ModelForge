@@ -5,8 +5,6 @@ Includes validation pass and error collection.
 
 import logging
 
-log = logging.getLogger(__name__)
-
 from qgis.core import (
     QgsProcessing,
     QgsProcessingModelAlgorithm,
@@ -26,6 +24,8 @@ from qgis.core import (
     QgsProcessingParameterVectorLayer,
 )
 from qgis.PyQt.QtCore import QPointF
+
+log = logging.getLogger(__name__)
 
 INPUT_TYPE_MAP = {
     "vector": QgsProcessingParameterVectorLayer,

@@ -38,9 +38,10 @@ import time
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
-from .errors import CancelledError, TimeoutError as MfTimeoutError
+from .errors import CancelledError
+from .errors import TimeoutError as MfTimeoutError
 
 # Re-export for callers that import the alias from this module.
 __all__ = [
@@ -94,11 +95,11 @@ class Job:
     status: str = "pending"
     progress: tuple[float, float, str] = (0.0, 0.0, "queued")
     submitted_at: float = field(default_factory=time.monotonic)
-    finished_at: Optional[float] = None
+    finished_at: float | None = None
     result: Any = None
-    error: Optional[str] = None
+    error: str | None = None
     cancel_event: threading.Event = field(default_factory=threading.Event)
-    future: Optional[Future] = None
+    future: Future | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Public, JSON-safe view of the job's state."""
@@ -340,7 +341,7 @@ def reset_registry() -> None:
 async def run_in_thread(
     worker: Callable[[ProgressCallback], Any],
     *,
-    on_progress: Optional[ProgressCallback] = None,
+    on_progress: ProgressCallback | None = None,
     timeout: float | None = None,
 ) -> Any:
     """Async wrapper around :meth:`JobRegistry.run`.

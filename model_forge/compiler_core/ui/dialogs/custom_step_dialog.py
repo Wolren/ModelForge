@@ -11,8 +11,8 @@ try:
     from qgis.PyQt.QtCore import Qt
     from qgis.PyQt.QtGui import QFont
     from qgis.PyQt.QtWidgets import (
-        QCheckBox,
-        QComboBox,
+        QCheckBox,  # noqa: F401
+        QComboBox,  # noqa: F401
         QDialog,
         QGroupBox,
         QHBoxLayout,
@@ -20,7 +20,7 @@ try:
         QLabel,
         QLineEdit,
         QListWidget,
-        QListWidgetItem,
+        QListWidgetItem,  # noqa: F401
         QMessageBox,
         QPlainTextEdit,
         QPushButton,

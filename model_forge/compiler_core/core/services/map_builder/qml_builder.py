@@ -37,7 +37,6 @@ from .style_templates import (
     get_symbol_defaults,
 )
 
-
 # --- Top-level emitter ----------------------------------------------
 
 
@@ -302,25 +301,25 @@ def _symbol_xml(kind: str, s: SymbolDefaults) -> str:
     """Emit a single ``<symbol>`` block for the geometry kind."""
     if kind == "polygon":
         return (
-            "    <symbol type='fill' alpha='{op}' name='0'>\n"
+            f"    <symbol type='fill' alpha='{s.opacity}' name='0'>\n"
             "      <layer class='SimpleFill' pass='0'>\n"
-            "        <prop k='color' v='{fill}' />\n"
-            "        <prop k='outline_color' v='{stroke}' />\n"
-            "        <prop k='outline_width' v='{sw}' />\n"
+            f"        <prop k='color' v='{s.fill_color}' />\n"
+            f"        <prop k='outline_color' v='{s.stroke_color}' />\n"
+            f"        <prop k='outline_width' v='{s.stroke_width}' />\n"
             "        <prop k='style' v='solid' />\n"
             "      </layer>\n"
             "    </symbol>"
-        ).format(op=s.opacity, fill=s.fill_color, stroke=s.stroke_color, sw=s.stroke_width)
+        )
     if kind == "line":
         return (
-            "    <symbol type='line' alpha='{op}' name='0'>\n"
+            f"    <symbol type='line' alpha='{s.opacity}' name='0'>\n"
             "      <layer class='SimpleLine' pass='0'>\n"
-            "        <prop k='color' v='{stroke}' />\n"
-            "        <prop k='width' v='{sw}' />\n"
+            f"        <prop k='color' v='{s.stroke_color}' />\n"
+            f"        <prop k='width' v='{s.stroke_width}' />\n"
             "        <prop k='capstyle' v='square' />\n"
             "      </layer>\n"
             "    </symbol>"
-        ).format(op=s.opacity, stroke=s.stroke_color, sw=s.stroke_width)
+        )
     if kind == "point":
         return (
             "    <symbol type='marker' alpha='{op}' name='0'>\n"

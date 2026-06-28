@@ -165,7 +165,7 @@ class ContextCollector:
         }
         if selected_layer_ids:
             context["selected_layers"] = [
-                l for l in context["layers"] if l["id"] in selected_layer_ids
+                layer for layer in context["layers"] if layer["id"] in selected_layer_ids
             ]
         return context
 

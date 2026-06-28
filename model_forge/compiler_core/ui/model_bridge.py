@@ -345,10 +345,10 @@ if _HAS_QGIS:
                 self._apply_bindings_direct(model, actual_id, bindings)
                 return model, id_map
             finally:
-                try:
+                import contextlib
+
+                with contextlib.suppress(OSError):
                     os.unlink(tmp)
-                except OSError:
-                    pass
 
         def _create_qgs_parameter(self, inp_def: dict[str, Any]):
             from qgis.core import (
@@ -456,9 +456,7 @@ if _HAS_QGIS:
                 return True
             if current == "temporary_output":
                 return True
-            if is_last_step and current in ("output", "result"):
-                return True
-            return False
+            return bool(is_last_step and current in ("output", "result"))
 
         @staticmethod
         def _expects_layer_like_input(pdef) -> bool:

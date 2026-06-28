@@ -47,7 +47,6 @@ from .style_templates import (
     get_template,
 )
 
-
 # --- Stage inputs and outputs ----------------------------------
 
 
@@ -598,13 +597,11 @@ def stage_map_zone(
         scale = req.scale  # may be None (auto)
 
     # Create a GridSpec when the profile enables the graticule.
-    if profile.include_graticule:
-        grid = GridSpec(
-            enabled=True,
-            annotation_enabled=True,
-        )
-    else:
-        grid = None
+    grid = (
+        GridSpec(enabled=True, annotation_enabled=True)
+        if profile.include_graticule
+        else None
+    )
 
     map = MapSpec(
         x=page.inner_x,

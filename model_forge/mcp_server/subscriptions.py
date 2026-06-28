@@ -30,7 +30,8 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 log = logging.getLogger(__name__)
 

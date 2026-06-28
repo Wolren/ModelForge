@@ -196,7 +196,7 @@ def _build_user_message(plan: dict, catalog: dict, max_algs: int = 40) -> str:
                 [
                     str(step.get("intent", "")),
                     str(step.get("label", "")),
-                    *[str(c) for c in (step.get("constraints") or {}).keys()],
+                    *[str(c) for c in (step.get("constraints") or {})],
                 ]
             )
         )

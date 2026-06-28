@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 
-
 from model_forge.compiler_core.core.compiler.algorithm_resolver import AlgorithmResolver
 from model_forge.compiler_core.core.compiler.expression_validator import ExpressionValidator
 from model_forge.compiler_core.core.compiler.intent_parser import IntentParser
@@ -27,7 +26,6 @@ from model_forge.compiler_core.core.compiler.link_repair import LinkRepairServic
 from model_forge.compiler_core.core.compiler.model_emitter import ModelEmitter
 from model_forge.compiler_core.core.compiler.pipeline import CompilerPipeline
 from model_forge.compiler_core.core.compiler.semantic_planner import SemanticPlanner
-
 
 # ─── Fake inner MCP client ────────────────────────────────────────────
 

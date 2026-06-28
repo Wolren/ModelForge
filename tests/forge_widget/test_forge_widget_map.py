@@ -19,7 +19,6 @@ from typing import Any
 
 import pytest
 
-
 # ─── Geometry kind heuristic ─────────────────────────────────────
 # These don't need a QApplication - they go through the unbound
 # function on the mixin class with a tiny host object.
@@ -421,7 +420,7 @@ def test_write_symbology_emits_one_qml_per_step(host: _TabHost, tmp_path, monkey
     # Use a permissive parser; the .qml DOCTYPE points at an
     # external DTD, so the default parser refuses to load it
     # without network access.
-    parser = ET.XMLParser()
+    ET.XMLParser()
     for f in files:
         with open(os.path.join(sym_dir, f), "rb") as fh:
             data = fh.read()
@@ -433,7 +432,7 @@ def test_write_symbology_emits_one_qml_per_step(host: _TabHost, tmp_path, monkey
 
 def test_build_and_apply_layout_writes_qpt_and_loads(host: _TabHost, tmp_path, monkeypatch) -> None:
     try:
-        from qgis.core import QgsLayoutItemMap
+        from qgis.core import QgsLayoutItemMap  # noqa: F401
     except ImportError:
         pytest.skip("No QGIS layout bindings available")
     added_layouts = _install_fake_project(monkeypatch, home=str(tmp_path))
@@ -582,7 +581,7 @@ class _QgsRectangle:
         self._xmax: float | None = xmax
         self._ymax: float | None = ymax
 
-    def combineExtentWith(self, other: "_QgsRectangle") -> None:
+    def combineExtentWith(self, other: _QgsRectangle) -> None:
         if self._xmin is not None and other._xmin is not None:
             self._xmin = min(self._xmin, other._xmin)
             self._ymin = min(self._ymin, other._ymin)
@@ -689,7 +688,6 @@ def _install_fake_project_with_layers(
 
     Returns the layout list for assertions.
     """
-    from types import SimpleNamespace
 
     added_layouts: list[Any] = []
 
@@ -733,7 +731,7 @@ def _install_fake_project_with_layers(
             pass
 
     class _Project:
-        _inst: "_Project | None" = None
+        _inst: _Project | None = None
 
         def __init__(self) -> None:
             self._home = home
@@ -742,7 +740,7 @@ def _install_fake_project_with_layers(
             self._crs = types.SimpleNamespace(authid=lambda: "EPSG:2180")
 
         @classmethod
-        def instance(cls) -> "_Project":
+        def instance(cls) -> _Project:
             if cls._inst is None:
                 cls._inst = cls()
             return cls._inst
@@ -827,14 +825,14 @@ def _install_fake_project(monkeypatch: pytest.MonkeyPatch, home: str) -> list[An
             return self._name
 
     class _Project:
-        _instance: "_Project | None" = None
+        _instance: _Project | None = None
 
         def __init__(self) -> None:
             self._home = home
             self._layout_manager = _LayoutManager()
 
         @classmethod
-        def instance(cls) -> "_Project":
+        def instance(cls) -> _Project:
             if cls._instance is None:
                 cls._instance = cls()
             return cls._instance

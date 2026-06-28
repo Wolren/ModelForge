@@ -15,7 +15,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-
 # --- North arrow SVG library -----------------------------------
 
 NORTH_ARROW_SVGS: dict[str, str] = {

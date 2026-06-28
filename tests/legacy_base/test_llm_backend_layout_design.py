@@ -14,15 +14,10 @@ normalisation + fallback behaviour.
 
 from __future__ import annotations
 
-from typing import Any
-
-import pytest
-
 from model_forge.legacy_base.llm_backend import (
     SYSTEM_PROMPT_LAYOUT_DESIGN,
     LLMBackend,
 )
-
 
 # --- System prompt is present + focused -------------------------
 
