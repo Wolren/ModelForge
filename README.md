@@ -1,16 +1,14 @@
-[![License](https://img.shields.io/github/license/Wolren/ModelForge)](LICENSE)
-[![Last commit](https://img.shields.io/github/last-commit/Wolren/ModelForge)](https://github.com/Wolren/ModelForge/commits)
-[![Issues](https://img.shields.io/github/issues/Wolren/ModelForge)](https://github.com/Wolren/ModelForge/issues)
-[![Repo size](https://img.shields.io/github/repo-size/Wolren/ModelForge)](https://github.com/Wolren/ModelForge)
-[![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python)](pyproject.toml)
-[![QGIS](https://img.shields.io/badge/QGIS-4.0+-green?logo=qgis)](https://qgis.org)
-[![Qt](https://img.shields.io/badge/Qt-6.x-green?logo=qt)](https://www.qt.io/)
+[![CI](https://github.com/Wolren/ModelForge/actions/workflows/ci.yml/badge.svg)](https://github.com/Wolren/ModelForge/actions/workflows/ci.yml)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Wolren/ModelForge/badge)](https://securityscorecards.dev/viewer/?uri=github.com/Wolren/ModelForge)
 [![Socket](https://img.shields.io/badge/Socket-Supply%20Chain%20Security-333?logo=socketdotdev)](https://socket.dev)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![QGIS 3.22+](https://img.shields.io/badge/QGIS-3.22+-green)](https://qgis.org)
+[![Qt](https://img.shields.io/badge/Qt-5.x_|_6.x-green)](https://www.qt.io/)
 
 # Model Forge ![Model Forge banner](model_forge/icon.png)
 
-> **EXPERIMENTAL** — This plugin is a work in progress. APIs, features, and UI may change without notice. External links and documentation may become outdated or broken.
+> **EXPERIMENTAL** - This plugin is a work in progress. APIs, features, and UI may change without notice. External links and documentation may become outdated or broken.
 
 ## What is Model Forge?
 
@@ -39,11 +37,11 @@ User Description --> LLM Backend --> QGIS Processing Model
 
 ### Key Capabilities
 
-- **Natural language to model** — Describe workflows like "Buffer input points by 500m, clip with city boundary, compute mean population"
-- **Multi-LLM support** — Works with OpenAI, Azure OpenAI, Anthropic, Google Gemini, Ollama, and any OpenAI-compatible endpoint (LM Studio, vLLM, OpenRouter, llama.cpp, local models, custom endpoints). Not locked to a single provider unlike [IntelliGeo](https://github.com/MahdiFarnaghi/intelli_geo)
-- **Visual model generation** — Opens directly in QGIS Model Designer with pre-computed layouts
-- **Iterative refinement** — Use repair prompts to fix or extend generated models
-- **Layout algorithms** — Sugiyama, topological, axis pack, radial shell, ancestor weighted
+- **Natural language to model** - Describe workflows like "Buffer input points by 500m, clip with city boundary, compute mean population"
+- **Multi-LLM support** - Works with OpenAI, Azure OpenAI, Anthropic, Google Gemini, Ollama, and any OpenAI-compatible endpoint (LM Studio, vLLM, OpenRouter, llama.cpp, local models, custom endpoints). Not locked to a single provider unlike [IntelliGeo](https://github.com/MahdiFarnaghi/intelli_geo)
+- **Visual model generation** - Opens directly in QGIS Model Designer with pre-computed layouts
+- **Iterative refinement** - Use repair prompts to fix or extend generated models
+- **Layout algorithms** - Sugiyama, topological, axis pack, radial shell, ancestor weighted
 
 ---
 
@@ -95,8 +93,8 @@ User Description --> LLM Backend --> QGIS Processing Model
 
 ### Repair Mode
 
-- **Auto-Repair** — validates JSON structure and sends repair request to LLM if issues found
-- **Send repair prompt** — describe fixes (e.g., "add dissolve after clip", "rename field to pop_2020")
+- **Auto-Repair** - validates JSON structure and sends repair request to LLM if issues found
+- **Send repair prompt** - describe fixes (e.g., "add dissolve after clip", "rename field to pop_2020")
 
 ### Settings
 
@@ -214,7 +212,7 @@ model-forge --llm-provider ollama --llm-model qwen2.5-coder:7b
 # OpenAI
 model-forge --llm-provider openai --llm-api-key sk-... --llm-model gpt-4o-mini
 
-# Any OpenAI-compatible endpoint (LM Studio, vLLM, OpenRouter, …)
+# Any OpenAI-compatible endpoint (LM Studio, vLLM, OpenRouter, ...)
 model-forge --llm-provider openai_compat \
   --llm-base-url http://localhost:1234 \
   --llm-model local-model \
@@ -253,16 +251,16 @@ Plus 6 outer prompts: `generate_model_from_intent`, `explain_model`, `convert_sc
 
 ### Map building: layout, symbology, execution
 
-The `generate_*` and `execute_model` tools close the model→map loop. The flow is:
+The `generate_*` and `execute_model` tools close the model->map loop. The flow is:
 
-1. **`generate_model`** — produce the model JSON (the same as the other tools).
-2. **`generate_symbology`** — emit one `.qml` file per output layer. The LLM picks the renderer (`single_symbol` / `categorized` / `graduated` / `rule_based`); the builder applies sensible defaults per geometry type.
-3. **`generate_print_layout`** — emit a `.qpt` print layout template. Templates: `default` (A4 portrait, full-bleed), `scientific` (Letter portrait, metadata block), `presentation` (16:9 landscape), `minimal` (legend-less, scale-bar only).
-4. **`verify_layout`** — run the ruleset against the .qpt (title within margins, scale bar ≥ 15mm, legend within map footprint, metadata block in scientific, no critical overlaps). Returns a list of stable violation codes (`E_TITLE_OUT_OF_MARGINS`, `E_LEGEND_OUTSIDE_MAP`, `E_NO_METADATA`, etc.) the LLM uses as constraints in a re-try loop (max 2 retries).
-5. **`export_layout`** — render the .qpt to PDF / PNG / SVG via `QgsLayoutExporter` (QGIS-required).
-6. **`execute_model`** — run a model JSON in headless QGIS via `processing.run()`. Topological execution with retries, per-step timing, and cancellation. Pure-Python on top of QGIS's `processing` module; no GUI needed.
+1. **`generate_model`** - produce the model JSON (the same as the other tools).
+2. **`generate_symbology`** - emit one `.qml` file per output layer. The LLM picks the renderer (`single_symbol` / `categorized` / `graduated` / `rule_based`); the builder applies sensible defaults per geometry type.
+3. **`generate_print_layout`** - emit a `.qpt` print layout template. Templates: `default` (A4 portrait, full-bleed), `scientific` (Letter portrait, metadata block), `presentation` (16:9 landscape), `minimal` (legend-less, scale-bar only).
+4. **`verify_layout`** - run the ruleset against the .qpt (title within margins, scale bar >= 15mm, legend within map footprint, metadata block in scientific, no critical overlaps). Returns a list of stable violation codes (`E_TITLE_OUT_OF_MARGINS`, `E_LEGEND_OUTSIDE_MAP`, `E_NO_METADATA`, etc.) the LLM uses as constraints in a re-try loop (max 2 retries).
+5. **`export_layout`** - render the .qpt to PDF / PNG / SVG via `QgsLayoutExporter` (QGIS-required).
+6. **`execute_model`** - run a model JSON in headless QGIS via `processing.run()`. Topological execution with retries, per-step timing, and cancellation. Pure-Python on top of QGIS's `processing` module; no GUI needed.
 
-The chained prompt `generate_complete_map_from_intent` orchestrates the whole flow: `generate_model` → `generate_symbology` → `generate_print_layout` → `verify_layout` (re-try on violations) → `export_layout`. This is the v3 "one-shot demo" — describe a workflow, get a model + a printable PDF.
+The chained prompt `generate_complete_map_from_intent` orchestrates the whole flow: `generate_model` -> `generate_symbology` -> `generate_print_layout` -> `verify_layout` (re-try on violations) -> `export_layout`. This is the v3 "one-shot demo" - describe a workflow, get a model + a printable PDF.
 
 ### Resources (3)
 
@@ -300,7 +298,7 @@ The server boots cleanly without QGIS installed. In that mode, `qgis_available` 
 2. On the headless box, call `load_catalog_from_file(path)`.
 3. Call `configure_headless_context(layers_json=...)` with a layer snapshot to give `list_layers` something to report.
 
-Algorithm discovery (`list_algorithms`, `get_algorithm_info`, `list_providers`, `list_algorithm_groups`) works against the loaded catalog. `generate_model` runs end-to-end — the compiler pipeline tolerates the missing QGIS registry via try/except fallbacks.
+Algorithm discovery (`list_algorithms`, `get_algorithm_info`, `list_providers`, `list_algorithm_groups`) works against the loaded catalog. `generate_model` runs end-to-end - the compiler pipeline tolerates the missing QGIS registry via try/except fallbacks.
 
 ### Security
 
