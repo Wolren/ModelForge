@@ -1,12 +1,12 @@
 [general]
 name=Model Forge
-qgisMinimumVersion=3.28
+qgisMinimumVersion=3.22
 qgisMaximumVersion=4.99
 description=Standalone monorepo plugin with dock UI + MCP compiler pipeline
-version=1.0.1
+version=1.0.0
 author=Wolren
-email=wolren@example.com
-license=GPL-2.0-or-later
+email=wolrenn@outlook.com
+license=GPL-3.0-only
 
 about=Self-contained monorepo plugin that fuses the legacy dock workflow UX with the newer MCP compiler, layout service, and custom-step tooling in one distributable package.
 
