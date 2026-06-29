@@ -14,7 +14,7 @@
 
 ## What is Model Forge?
 
-Model Forge is a QGIS plugin that generates editable geoprocessing models from plain-language descriptions. It bridges AI language models with QGIS Processing Framework, transforming natural language workflow descriptions into visual models ready for editing, refinement, and execution.
+Model Forge is a QGIS plugin that generates editable geoprocessing models from plain-language descriptions. It connects language models to the QGIS Processing Framework, transforming natural language workflow descriptions into visual models ready for editing, refinement, and execution.
 
 ### Gallery
 
@@ -40,7 +40,7 @@ User Description --> LLM Backend --> QGIS Processing Model
 ### Key Capabilities
 
 - **Natural language to model** - Describe workflows like "Buffer input points by 500m, clip with city boundary, compute mean population"
-- **Multi-LLM support** - Works with OpenAI, Azure OpenAI, Anthropic, Google Gemini, Ollama, and any OpenAI-compatible endpoint (LM Studio, vLLM, OpenRouter, llama.cpp, local models, custom endpoints). Not locked to a single provider unlike [IntelliGeo](https://github.com/MahdiFarnaghi/intelli_geo)
+- **Multi-LLM support** - Works with OpenAI, Azure OpenAI, Anthropic, Google Gemini, Ollama, and any OpenAI-compatible endpoint (LM Studio, vLLM, OpenRouter, llama.cpp, local models, custom endpoints).
 - **Visual model generation** - Opens directly in QGIS Model Designer with pre-computed layouts
 - **Iterative refinement** - Use repair prompts to fix or extend generated models
 - **Layout algorithms** - Sugiyama, topological, axis pack, radial shell, ancestor weighted
