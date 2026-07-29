@@ -87,7 +87,7 @@ jobs:
           import sys
           plugin_dir = os.environ["PLUGIN_DIR"]
           plugin_path = os.path.join("/plugin", plugin_dir)
-          sys.path.insert(0, plugin_path)
+          sys.path.insert(0, "/plugin")
 
           errors = 0
 
