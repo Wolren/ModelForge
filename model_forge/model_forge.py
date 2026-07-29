@@ -14,7 +14,7 @@ import sys
 
 from qgis.PyQt.QtCore import QCoreApplication, Qt
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction
+from qgis.PyQt.QtGui import QAction
 
 from .compiler_core.log import configure_logger
 from .forge_dock import ForgeDock
@@ -72,7 +72,7 @@ class ModelForge:
             self.dock.close()
             self.dock = None
         self.dock = ForgeDock(self.iface, self, self.iface.mainWindow())
-        self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dock)
+        self.iface.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock)
         self.dock.show()
 
     def _init_processing(self):
@@ -104,7 +104,10 @@ class ModelForge:
             try:
                 self.register_generated_step(mod_path, module_name=mod_name)
             except Exception as e:
-                warnings.warn(f"ModelForge: failed to register user step {fname}: {e}", stacklevel=2)
+                warnings.warn(
+                    f"ModelForge: failed to register user step {fname}: {e}",
+                    stacklevel=2,
+                )
 
     def register_generated_step(self, py_path, module_name=None):
         if not _HAS_QGIS:

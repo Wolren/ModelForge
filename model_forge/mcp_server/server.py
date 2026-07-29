@@ -1,4 +1,4 @@
-"""FastMCP server exposing Model Forge's compiler pipeline + QGIS context as tools."""
+"""MCPServer exposing Model Forge's compiler pipeline + QGIS context as tools."""
 
 from __future__ import annotations
 
@@ -43,6 +43,9 @@ from .llm_config import (
 )
 
 log = logging.getLogger(__name__)
+
+# How many arguments a progress-tuple carries (current, total, message)
+_PROGRESS_TRIPLE = 3
 
 # Try importing uvicorn for SSE server control
 _HAS_UVICORN = False
@@ -246,7 +249,7 @@ class ServerState:
 
 # --- Global server reference --------------------------------------------
 
-_server_instance: FastMCP | None = None
+_server_instance: MCPServer | None = None
 _server_thread: threading.Thread | None = None
 _server_uvicorn: Any | None = None  # uvicorn.Server instance for SSE
 _server_state: ServerState | None = None
@@ -254,7 +257,7 @@ _server_port: int = 9090
 _server_shutdown_timeout: float = 15.0
 
 if _HAS_MCP:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import Context, MCPServer
 
 
 def _get_state() -> ServerState:
@@ -265,6 +268,55 @@ def _get_state() -> ServerState:
 
 
 # --- Tool helpers -------------------------------------------------------
+
+
+def _validate_path_read(path: str, purpose: str = "read") -> str:
+    """Validate and resolve a file path for reading.
+
+    Returns the resolved absolute path, or raises ConfigError if the
+    path is unsafe (e.g. attempts directory traversal, doesn't exist).
+    """
+    import os.path
+
+    if not path or not isinstance(path, str):
+        raise ConfigError(
+            f"Path for {purpose} must be a non-empty string",
+            details={"purpose": purpose},
+        )
+    resolved = os.path.realpath(path)
+    if not os.path.isfile(resolved):
+        raise ConfigError(
+            f"File not found for {purpose}: {path}",
+            details={"purpose": purpose, "resolved": resolved},
+        )
+    return resolved
+
+
+def _validate_path_write(path: str, purpose: str = "write") -> str:
+    """Validate and resolve a file path for writing.
+
+    Returns the resolved absolute path, or raises ConfigError if the
+    path is unsafe (e.g. attempts directory traversal).
+    """
+    import os.path
+
+    if not path or not isinstance(path, str):
+        raise ConfigError(
+            f"Path for {purpose} must be a non-empty string",
+            details={"purpose": purpose},
+        )
+    resolved = os.path.realpath(path)
+    # Ensure the parent directory exists (or can be created)
+    parent = os.path.dirname(resolved)
+    if parent and not os.path.isdir(parent):
+        try:
+            os.makedirs(parent, exist_ok=True)
+        except OSError as e:
+            raise ConfigError(
+                f"Cannot create parent directory for {purpose}: {parent}",
+                details={"purpose": purpose, "error": str(e)},
+            ) from e
+    return resolved
 
 
 def _model_json_from_str(model_json_str: str) -> dict:
@@ -306,7 +358,7 @@ def _validate_model_json(model: dict) -> list[str]:
 # --- Tool: Context ------------------------------------------------------
 
 
-def _register_context_tools(mcp: FastMCP) -> None:
+def _register_context_tools(mcp: MCPServer) -> None:
     @mcp.tool(
         description=(
             "List all layers currently loaded in the QGIS project. "
@@ -496,7 +548,7 @@ def _fuzzy_score(query: str, alg_id: str, name: str) -> float:
     return hits / len(q_tokens)
 
 
-def _register_algorithm_tools(mcp: FastMCP) -> None:
+def _register_algorithm_tools(mcp: MCPServer) -> None:
     @mcp.tool(
         description=(
             "Search available QGIS Processing algorithms by name, ID, or provider prefix. "
@@ -672,17 +724,12 @@ def _register_algorithm_tools(mcp: FastMCP) -> None:
         )
     )
     async def load_catalog_from_file(path: str) -> str:
-        import os
-
-        if not os.path.isfile(path):
-            return error_response_json(
-                ConfigError(
-                    f"Catalog file not found: {path}",
-                    details={"path": path},
-                )
-            )
         try:
-            with open(path, encoding="utf-8") as f:
+            resolved = _validate_path_read(path, purpose="load_catalog_from_file")
+        except ConfigError as e:
+            return error_response_json(e)
+        try:
+            with open(resolved, encoding="utf-8") as f:
                 data = json.load(f)
         except json.JSONDecodeError as e:
             return error_response_json(
@@ -739,7 +786,11 @@ def _register_algorithm_tools(mcp: FastMCP) -> None:
         if path is None:
             return json.dumps(catalog, indent=2, ensure_ascii=False)
         try:
-            with open(path, "w", encoding="utf-8") as f:
+            resolved = _validate_path_write(path, purpose="export_catalog")
+        except ConfigError as e:
+            return error_response_json(e)
+        try:
+            with open(resolved, "w", encoding="utf-8") as f:
                 json.dump(catalog, f, indent=2, ensure_ascii=False, sort_keys=True)
         except OSError as e:
             return error_response_json(
@@ -846,8 +897,10 @@ def _wrap_script_as_runnable(model: dict, raw_script: str) -> str:
     args_block = "\n".join(arg_lines) if arg_lines else "    pass"
     return (
         f'#!/usr/bin/env python\n"""\nAuto-generated by Model Forge MCP server.\n'
-        f"Model: {model.get('model_name', 'workflow')}\nGroup: {model.get('model_group', 'ModelForge')}\n"
-        f'"""\nimport argparse\n\n\ndef main():\n    parser = argparse.ArgumentParser()\n{args_block}\n'
+        f"Model: {model.get('model_name', 'workflow')}\n"
+        f"Group: {model.get('model_group', 'ModelForge')}\n"
+        f'"""\nimport argparse\n\n\n'
+        f'def main():\n    parser = argparse.ArgumentParser()\n{args_block}\n'
         f'    args = parser.parse_args()\n\n\nif __name__ == "__main__":\n    main()\n\n\n'
         f"# ---- processing script body (exported by Model Forge) ----\n"
         f"{raw_script}\n"
@@ -899,42 +952,6 @@ def _model_to_qgis_process_recipe(model: dict) -> dict:
     }
 
 
-def _guess_geometry_kind(alg: dict[str, Any]) -> str:
-    """Best-effort guess of the geometry kind for a step.
-
-    We read the algorithm_id - if it carries a known hint
-    (e.g. ``native:buffer`` produces the same kind as its input;
-    ``native:centroids`` produces points) we use that. Otherwise
-    we look at the upstream ``model_input`` and the user's
-    ``_mf_layer_geometry_kind`` hint. Falls back to ``polygon``
-    because the LLM-emitted model JSON rarely carries geometry
-    metadata and polygon is the conservative default.
-    """
-    alg_id = str(alg.get("algorithm_id", "") or "").lower()
-    # Algorithm id hints.
-    HINTS = {
-        "native:centroids": "point",
-        "native:pointstolines": "line",
-        "native:linestopolygons": "polygon",
-        "native:pointstopolygons": "polygon",
-        "native:rasterize": "raster",
-        "gdal:warpreproject": "raster",
-        "gdal:translate": "raster",
-    }
-    if alg_id in HINTS:
-        return HINTS[alg_id]
-    # Suffix-based heuristic.
-    for suffix, kind in (
-        ("polygon", "polygon"),
-        ("line", "line"),
-        ("point", "point"),
-        ("raster", "raster"),
-    ):
-        if alg_id.endswith(":" + suffix) or suffix in alg_id:
-            return kind
-    return "polygon"
-
-
 # --- Tool: Generation --------------------------------------------------
 
 
@@ -967,14 +984,14 @@ def _make_progress_callback(base: Any | None, cancel_event: threading.Event | No
                 # current/total so emit (0, 1, message) which clients
                 # render as a spinner with text.
                 current, total, message = 0.0, 1.0, args[0]
-            elif len(args) == 3:
+            elif len(args) == _PROGRESS_TRIPLE:
                 current, total, message = args
             else:
                 return
             base(float(current), float(total), str(message))
         except CancelledError:
             raise
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.debug("progress forward failed", exc_info=True)
 
     return _wrapped
@@ -1058,7 +1075,7 @@ def _run_pipeline(
     return plan, model_json
 
 
-def _register_generation_tools(mcp: FastMCP) -> None:
+def _register_generation_tools(mcp: MCPServer) -> None:
     @mcp.tool(
         description=(
             "Generate a complete QGIS Processing model from a natural language description. "
@@ -1081,6 +1098,7 @@ def _register_generation_tools(mcp: FastMCP) -> None:
         max_algorithms: int = 100,
         progress_token: str | None = None,
         timeout_seconds: float | None = None,
+        ctx: Context | None = None,
     ) -> str:
         state = _get_state()
         try:
@@ -1095,22 +1113,23 @@ def _register_generation_tools(mcp: FastMCP) -> None:
         except LLMNotConfiguredError as e:
             return error_response_json(e)
 
-        ctx = state.context
+        qgis_ctx = state.context
         if layer_ids:
             wanted = set(layer_ids)
-            ctx["layers"] = [layer for layer in ctx.get("layers", []) if layer["id"] in wanted]
+            qgis_ctx["layers"] = [
+                layer for layer in qgis_ctx.get("layers", [])
+                if layer["id"] in wanted
+            ]
 
         # Hook progress up to MCP's ``report_progress`` if we have a
-        # progress token. ``mcp.get_context()`` is the FastMCP context
-        # object; in stdio we always have it, in SSE we have it for the
-        # duration of the request.
+        # progress token. In v2, ``ctx.report_progress()`` handles the
+        # progress token internally.
         def _on_progress(current: float, total: float, message: str) -> None:
             if not progress_token:
                 return
             try:
-                mcp_ctx = mcp.get_context()  # type: ignore[attr-defined]
-                mcp_ctx.request_context.report_progress(progress_token, current, total, message)
-            except Exception:  # noqa: BLE001
+                ctx.report_progress(current, total, message)
+            except Exception:
                 # The client may not support progress; never let a
                 # notification failure abort the generation.
                 log.debug("report_progress failed", exc_info=True)
@@ -1133,14 +1152,14 @@ def _register_generation_tools(mcp: FastMCP) -> None:
         from .jobs import Job
 
         job = Job(job_id=__import__("uuid").uuid4().hex)
-        with registry._lock:  # noqa: SLF001 - internal but stable enough
-            registry._jobs[job.job_id] = job  # noqa: SLF001
+        with registry._lock:
+            registry._jobs[job.job_id] = job
 
         worker_args = dict(
             description=description,
             model_name=model_name,
             model_group=model_group,
-            qgis_context=ctx,
+            qgis_context=qgis_ctx,
             llm_config=llm.to_dict(),
             algorithm_ids=algorithm_ids,
             algorithm_groups=algorithm_groups,
@@ -1197,7 +1216,7 @@ def _register_generation_tools(mcp: FastMCP) -> None:
             # event so the worker can short-circuit on its next poll.
             job.cancel_event.set()
             raise
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.error("Pipeline failed", exc_info=True)
             err = PipelineFailedError(str(e))
             err.details.setdefault("job_id", job.job_id)
@@ -1275,8 +1294,10 @@ def _register_generation_tools(mcp: FastMCP) -> None:
         description=(
             "Export a model JSON to QGIS .model3 file, Python Processing script, "
             "or Mermaid diagram chart. Returns JSON with 'path' and 'content' fields. "
-            "Available formats: 'json' (pretty-printed JSON), 'mermaid' (flowchart diagram), "
-            "'script' (standalone Python Processing script), 'model3' (QGIS model XML, requires QGIS)."
+            "Available formats: 'json' (pretty-printed JSON), "
+            "'mermaid' (flowchart diagram), "
+            "'script' (standalone Python Processing script), "
+            "'model3' (QGIS model XML, requires QGIS)."
         )
     )
     async def export_model(
@@ -1296,11 +1317,21 @@ def _register_generation_tools(mcp: FastMCP) -> None:
 
         export_format = export_format.lower()
 
+        # Validate user-supplied output_path early, before any format-specific logic.
+        resolved_output_path: str | None = None
+        if output_path is not None:
+            try:
+                resolved_output_path = _validate_path_write(
+                    output_path, purpose="export_model"
+                )
+            except ConfigError as e:
+                return error_response_json(e)
+
         if export_format == "json":
             # If output_path is provided, also write a pretty-printed copy.
-            if output_path:
+            if resolved_output_path:
                 try:
-                    with open(output_path, "w", encoding="utf-8") as f:
+                    with open(resolved_output_path, "w", encoding="utf-8") as f:
                         json.dump(model, f, indent=2, ensure_ascii=False)
                 except OSError as e:
                     return error_response_json(
@@ -1315,7 +1346,7 @@ def _register_generation_tools(mcp: FastMCP) -> None:
             try:
                 to_mermaid = _import_mermaid()
                 return to_mermaid(model)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 return error_response_json(
                     ConfigError(
                         f"Mermaid render failed: {e}",
@@ -1326,8 +1357,8 @@ def _register_generation_tools(mcp: FastMCP) -> None:
         if export_format == "script":
             try:
                 export_to_processing_script = _import_exporter()
-                if output_path:
-                    path = export_to_processing_script(model, output_path)
+                if resolved_output_path:
+                    path = export_to_processing_script(model, resolved_output_path)
                     with open(path, encoding="utf-8") as f:
                         content = f.read()
                     return json.dumps(
@@ -1353,7 +1384,7 @@ def _register_generation_tools(mcp: FastMCP) -> None:
                     with contextlib.suppress(OSError):
                         _os.unlink(tmp_path)
                 return content
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 return error_response_json(
                     ConfigError(
                         f"Script export failed: {e}",
@@ -1368,10 +1399,12 @@ def _register_generation_tools(mcp: FastMCP) -> None:
                         ".model3 export requires QGIS. Use 'script' or 'json' format."
                     )
                 )
-            if not output_path:
-                import tempfile
-
-                output_path = tempfile.mktemp(suffix=".model3", prefix="mf_model_")
+            model3_path = (
+                resolved_output_path
+                or tempfile.NamedTemporaryFile(
+                    suffix=".model3", prefix="mf_model_", delete=False
+                ).name
+            )
             try:
                 bridge_path = "model_forge.compiler_core.ui.model_builder_bridge.ModelBuilderBridge"
                 from importlib import import_module
@@ -1381,21 +1414,21 @@ def _register_generation_tools(mcp: FastMCP) -> None:
                 bridge = bridge_cls()
                 qgs_model = bridge.load_model_json(model, open_designer=False)
 
-                if qgs_model.toFile(output_path):
-                    with open(output_path, encoding="utf-8") as f:
+                if qgs_model.toFile(model3_path):
+                    with open(model3_path, encoding="utf-8") as f:
                         content = f.read()
                     return json.dumps(
-                        {"path": output_path, "content": content},
+                        {"path": model3_path, "content": content},
                         indent=2,
                         ensure_ascii=False,
                     )
                 return error_response_json(
                     ConfigError(
                         "toFile failed",
-                        details={"output_path": output_path},
+                        details={"output_path": model3_path},
                     )
                 )
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 return error_response_json(
                     ConfigError(
                         f".model3 export failed: {e}",
@@ -1408,9 +1441,9 @@ def _register_generation_tools(mcp: FastMCP) -> None:
             # model's output layer schema (field names + types). Useful
             # as a contract artifact the user can hand to a consumer.
             feature_collection = _model_to_geojson_contract(model)
-            if output_path:
+            if resolved_output_path:
                 try:
-                    with open(output_path, "w", encoding="utf-8") as f:
+                    with open(resolved_output_path, "w", encoding="utf-8") as f:
                         json.dump(feature_collection, f, indent=2, ensure_ascii=False)
                 except OSError as e:
                     return error_response_json(
@@ -1427,7 +1460,7 @@ def _register_generation_tools(mcp: FastMCP) -> None:
             return json.dumps(feature_collection, indent=2, ensure_ascii=False)
 
         if export_format == "gpkg":
-            if not output_path:
+            if not resolved_output_path:
                 return error_response_json(
                     ConfigError(
                         "gpkg export requires output_path.",
@@ -1462,13 +1495,13 @@ def _register_generation_tools(mcp: FastMCP) -> None:
                     )
                 import os as _os
 
-                if _os.path.exists(output_path):
-                    driver.DeleteDataSource(output_path)
-                ds = driver.CreateDataSource(output_path)
+                if _os.path.exists(resolved_output_path):
+                    driver.DeleteDataSource(resolved_output_path)
+                ds = driver.CreateDataSource(resolved_output_path)
                 if ds is None:
                     return error_response_json(
                         ConfigError(
-                            f"Failed to create GeoPackage at {output_path}.",
+                            f"Failed to create GeoPackage at {resolved_output_path}.",
                             details={"output_path": output_path},
                         )
                     )
@@ -1481,11 +1514,11 @@ def _register_generation_tools(mcp: FastMCP) -> None:
                         lyr.CreateField(fld_defn)
                 ds = None
                 return json.dumps(
-                    {"path": output_path, "layers": list(schema.keys())},
+                    {"path": resolved_output_path, "layers": list(schema.keys())},
                     indent=2,
                     ensure_ascii=False,
                 )
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 return error_response_json(
                     ConfigError(
                         f"GeoPackage export failed: {e}",
@@ -1513,8 +1546,8 @@ def _register_generation_tools(mcp: FastMCP) -> None:
                     with contextlib.suppress(OSError):
                         _os.unlink(raw_path)
                 wrapped = _wrap_script_as_runnable(model, raw_body)
-                if output_path:
-                    with open(output_path, "w", encoding="utf-8") as f:
+                if resolved_output_path:
+                    with open(resolved_output_path, "w", encoding="utf-8") as f:
                         f.write(wrapped)
                     return json.dumps(
                         {"path": output_path, "content": wrapped},
@@ -1522,7 +1555,7 @@ def _register_generation_tools(mcp: FastMCP) -> None:
                         ensure_ascii=False,
                     )
                 return wrapped
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 return error_response_json(
                     ConfigError(
                         f"runnable_script export failed: {e}",
@@ -1532,9 +1565,9 @@ def _register_generation_tools(mcp: FastMCP) -> None:
 
         if export_format == "processing_runnable_json":
             recipe = _model_to_qgis_process_recipe(model)
-            if output_path:
+            if resolved_output_path:
                 try:
-                    with open(output_path, "w", encoding="utf-8") as f:
+                    with open(resolved_output_path, "w", encoding="utf-8") as f:
                         json.dump(recipe, f, indent=2, ensure_ascii=False)
                 except OSError as e:
                     return error_response_json(
@@ -1645,374 +1678,10 @@ def _register_generation_tools(mcp: FastMCP) -> None:
         return json.dumps(status, indent=2, ensure_ascii=False)
 
 
-# --- Tool: Map building (print layout + symbology + execution) ---
-
-
-def _register_map_tools(mcp: FastMCP) -> None:
-    @mcp.tool(
-        description=(
-            "Generate a QGIS print layout template (.qpt) for the given model JSON. "
-            "Choose a template: 'default', 'scientific', 'presentation', or 'minimal'. "
-            "The LLM writes the title / subtitle text; the verifier checks structural "
-            "correctness (margins, overlaps, required items) before returning. "
-            "If ``verify=True`` (default), the layout is checked against the ruleset "
-            "and a list of violations is included in the response. Pass "
-            "``output_layer_ids`` to control what shows in the legend."
-        )
-    )
-    async def generate_print_layout(
-        model_json_str: str,
-        output_path: str,
-        template: str = "default",
-        title: str = "",
-        subtitle: str = "",
-        crs: str = "",
-        author: str = "",
-        output_layer_ids: list[str] | None = None,
-        verify: bool = True,
-    ) -> str:
-        try:
-            from model_forge.compiler_core.core.services.map_builder.layout_verifier import (
-                verify_qpt,
-            )
-            from model_forge.compiler_core.core.services.map_builder.qpt_builder import build_qpt
-        except ImportError as e:
-            return error_response_json(
-                ConfigError(
-                    "Map-building modules are not available in this environment.",
-                    details={"exception": str(e)},
-                )
-            )
-
-        try:
-            _model_json_from_str(model_json_str)
-        except json.JSONDecodeError as e:
-            return error_response_json(
-                InvalidJSONError(
-                    f"Invalid model JSON: {e}",
-                    details={"line": e.lineno, "column": e.colno},
-                )
-            )
-
-        try:
-            qpt_xml = build_qpt(
-                template=template,
-                title=title,
-                subtitle=subtitle,
-                crs=crs,
-                author=author,
-                output_layer_ids=output_layer_ids,
-            )
-        except Exception as e:  # noqa: BLE001
-            return error_response_json(
-                ConfigError(
-                    f"qpt_builder failed: {e}",
-                    details={"template": template, "exception_type": type(e).__name__},
-                )
-            )
-
-        try:
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(qpt_xml)
-        except OSError as e:
-            return error_response_json(
-                ConfigError(
-                    f"Failed to write .qpt to {output_path}: {e}",
-                    details={"output_path": output_path},
-                )
-            )
-
-        result: dict = {
-            "status": "ok",
-            "path": output_path,
-            "template": template,
-            "bytes_written": len(qpt_xml.encode("utf-8")),
-        }
-        if verify:
-            try:
-                report = verify_qpt(qpt_xml)
-                result["verification"] = report.to_dict()
-            except Exception as e:  # noqa: BLE001
-                result["verification"] = {
-                    "passed": False,
-                    "error": f"verifier raised: {e}",
-                }
-        return json.dumps(result, indent=2, ensure_ascii=False)
-
-    @mcp.tool(
-        description=(
-            "Verify a .qpt print layout document against the layout ruleset. "
-            "Returns a list of violations plus a pass/fail verdict. Use this in "
-            "a re-try loop: if the LLM emits a layout that fails verification, "
-            "include the violation messages as constraints for the next emission."
-        )
-    )
-    async def verify_layout(qpt_xml_or_path: str) -> str:
-        try:
-            from model_forge.compiler_core.core.services.map_builder.layout_verifier import (
-                verify_qpt,
-            )
-        except ImportError as e:
-            return error_response_json(
-                ConfigError(
-                    "layout_verifier is not available.",
-                    details={"exception": str(e)},
-                )
-            )
-        # Accept either inline XML or a path to a .qpt file.
-        qpt_xml = qpt_xml_or_path
-        if "\n" not in qpt_xml and "<Layout" not in qpt_xml:
-            try:
-                with open(qpt_xml, encoding="utf-8") as f:
-                    qpt_xml = f.read()
-            except OSError as e:
-                return error_response_json(
-                    ConfigError(
-                        f"Failed to read {qpt_xml}: {e}",
-                        details={"path": qpt_xml},
-                    )
-                )
-        report = verify_qpt(qpt_xml)
-        return json.dumps(report.to_dict(), indent=2, ensure_ascii=False)
-
-    @mcp.tool(
-        description=(
-            "Render a .qpt print layout to PDF, PNG, or SVG using QGIS. "
-            "QGIS is required (the tool returns E_QGIS_NOT_AVAILABLE in headless "
-            "mode unless a custom QgisProject is supplied). For PDFs the "
-            "rendering is vector (crisp at any zoom); for PNGs the resolution "
-            "is controlled by the ``dpi`` parameter."
-        )
-    )
-    async def export_layout(
-        qpt_path: str,
-        output_path: str,
-        format: str = "pdf",
-        dpi: int = 300,
-    ) -> str:
-        if not _HAS_QGIS:
-            return error_response_json(
-                QGISNotAvailableError(
-                    "export_layout requires QGIS. Use 'qpt' format and open the file in QGIS."
-                )
-            )
-        try:
-            from qgis.core import (
-                QgsApplication,  # noqa: F401
-                QgsLayoutExporter,
-                QgsPrintLayout,
-                QgsProject,
-            )
-            from qgis.PyQt.QtCore import QRectF
-        except ImportError as e:
-            return error_response_json(
-                QGISNotAvailableError(
-                    "QGIS Python bindings are incomplete.",
-                    details={"exception": str(e)},
-                )
-            )
-        project = QgsProject.instance()
-        layout = QgsPrintLayout(project)
-        # ``loadFromTemplate`` reads the .qpt XML; if the file is
-        # not on disk, the caller must have passed inline content.
-        if not layout.loadFromTemplate(qpt_path):
-            return error_response_json(
-                ConfigError(
-                    f"Failed to load .qpt from {qpt_path}",
-                    details={"path": qpt_path},
-                )
-            )
-        fmt = format.lower()
-        if fmt == "pdf":
-            exporter = QgsLayoutExporter(layout)
-            settings = QgsLayoutExporter.PdfExportSettings()
-            settings.dpi = dpi
-            result = exporter.exportToPdf(output_path, settings)
-            ok = result == QgsLayoutExporter.ExportResult.Success
-        elif fmt == "png":
-            exporter = QgsLayoutExporter(layout)
-            settings = QgsLayoutExporter.ImageExportSettings()
-            settings.dpi = dpi
-            page_rect = QRectF(
-                0,
-                0,
-                layout.pageCollection().page(0).pageSize().width(),
-                layout.pageCollection().page(0).pageSize().height(),
-            )
-            result = exporter.exportToImage(output_path, settings, page_rect)
-            ok = result == QgsLayoutExporter.ExportResult.Success
-        elif fmt == "svg":
-            exporter = QgsLayoutExporter(layout)
-            settings = QgsLayoutExporter.SvgExportSettings()
-            settings.dpi = dpi
-            result = exporter.exportToSvg(output_path, settings)
-            ok = result == QgsLayoutExporter.ExportResult.Success
-        else:
-            return error_response_json(
-                ConfigError(
-                    f"Unknown export format {format!r}. Use pdf, png, or svg.",
-                    details={"format": format},
-                )
-            )
-        if not ok:
-            return error_response_json(
-                ConfigError(
-                    f"Layout export failed with code {result}.",
-                    details={"path": output_path, "format": fmt, "code": int(result)},
-                )
-            )
-        return json.dumps(
-            {"status": "ok", "path": output_path, "format": fmt, "dpi": dpi},
-            indent=2,
-            ensure_ascii=False,
-        )
-
-    @mcp.tool(
-        description=(
-            "Generate per-layer-type default symbology (QML XML) for the "
-            "model's output layers. The LLM picks a renderer per layer "
-            "(single_symbol / categorized / graduated / rule_based); the "
-            "tool emits one .qml file per layer. Outputs are written to "
-            "``output_dir`` and named ``<step_id>.qml``. Returns a list of "
-            "{step_id, geometry_kind, renderer, path} entries."
-        )
-    )
-    async def generate_symbology(
-        model_json_str: str,
-        output_dir: str,
-        *,
-        default_renderer: str = "single_symbol",
-        classification_field: str | None = None,
-        classification_method: str = "equal",
-    ) -> str:
-        try:
-            from model_forge.compiler_core.core.services.map_builder.qml_builder import (
-                build_qml,
-            )
-        except ImportError as e:
-            return error_response_json(
-                ConfigError(
-                    "qml_builder is not available.",
-                    details={"exception": str(e)},
-                )
-            )
-        try:
-            model = _model_json_from_str(model_json_str)
-        except json.JSONDecodeError as e:
-            return error_response_json(
-                InvalidJSONError(
-                    f"Invalid model JSON: {e}",
-                    details={"line": e.lineno, "column": e.colno},
-                )
-            )
-
-        import os
-
-        os.makedirs(output_dir, exist_ok=True)
-
-        # Determine geometry kind per step from the upstream
-        # model_input fields, or default to polygon.
-        layer_results: list[dict[str, Any]] = []
-        for alg in model.get("algorithms", []):
-            step_id = str(alg.get("id", "") or "")
-            if not step_id:
-                continue
-            kind = _guess_geometry_kind(alg)
-            try:
-                qml = build_qml(
-                    geometry_kind=kind,
-                    layer_name=step_id,
-                    renderer=default_renderer,
-                    field_name=classification_field,
-                    classes=5,
-                    classification_mode=classification_method,
-                )
-            except Exception as e:  # noqa: BLE001
-                layer_results.append({"step_id": step_id, "error": f"qml_builder failed: {e}"})
-                continue
-            out_path = os.path.join(output_dir, f"{step_id}.qml")
-            try:
-                with open(out_path, "w", encoding="utf-8") as f:
-                    f.write(qml)
-            except OSError as e:
-                layer_results.append({"step_id": step_id, "error": f"write failed: {e}"})
-                continue
-            layer_results.append(
-                {
-                    "step_id": step_id,
-                    "geometry_kind": kind,
-                    "renderer": default_renderer,
-                    "path": out_path,
-                    "bytes_written": len(qml.encode("utf-8")),
-                }
-            )
-        return json.dumps(
-            {
-                "status": "ok",
-                "output_dir": output_dir,
-                "layers": layer_results,
-            },
-            indent=2,
-            ensure_ascii=False,
-        )
-
-    @mcp.tool(
-        description=(
-            "Run a model JSON in a QGIS environment. Requires QGIS Python "
-            "(no GUI needed) - the runner calls ``processing.run()`` for "
-            "each step in topological order and threads outputs to inputs. "
-            "``fail_fast=True`` (default) aborts on the first failure; "
-            "``fail_fast=False`` continues and reports per-step status. "
-            "``max_retries`` retries each step on failure with exponential "
-            "backoff. Returns a per-step execution report with timings, "
-            "status, inputs, and outputs."
-        )
-    )
-    async def execute_model(
-        model_json_str: str,
-        fail_fast: bool = True,
-        max_retries: int = 0,
-    ) -> str:
-        try:
-            from model_forge.compiler_core.core.services.model_runner import (
-                run_model,
-            )
-        except ImportError as e:
-            return error_response_json(
-                ConfigError(
-                    "model_runner is not available.",
-                    details={"exception": str(e)},
-                )
-            )
-        try:
-            model = _model_json_from_str(model_json_str)
-        except json.JSONDecodeError as e:
-            return error_response_json(
-                InvalidJSONError(
-                    f"Invalid model JSON: {e}",
-                    details={"line": e.lineno, "column": e.colno},
-                )
-            )
-        try:
-            report = run_model(
-                model,
-                fail_fast=fail_fast,
-                max_retries=max_retries,
-            )
-        except Exception as e:  # noqa: BLE001
-            return error_response_json(
-                ConfigError(
-                    f"Model run failed: {e}",
-                    details={"exception_type": type(e).__name__},
-                )
-            )
-        return json.dumps(report.to_dict(), indent=2, ensure_ascii=False)
-
-
 # --- Tool: Server Management --------------------------------------------
 
 
-def _register_management_tools(mcp: FastMCP) -> None:
+def _register_management_tools(mcp: MCPServer) -> None:
     @mcp.tool(
         description=(
             "Check the subscription dirty-set for resources and the "
@@ -2154,7 +1823,7 @@ def _register_management_tools(mcp: FastMCP) -> None:
         if persist:
             try:
                 _save_config({"llm": state.llm_config})
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 return error_response_json(
                     ConfigError(
                         f"Failed to persist config to {_config_path()}: {e}",
@@ -2228,11 +1897,6 @@ TOOL_REGISTRY: tuple[str, ...] = (
     "validate_model",
     "export_model",
     "summarize_model",
-    "generate_print_layout",
-    "verify_layout",
-    "export_layout",
-    "generate_symbology",
-    "execute_model",
     "set_llm_config",
     "get_server_info",
     "cancel_generation",
@@ -2243,8 +1907,8 @@ TOOL_REGISTRY: tuple[str, ...] = (
 )
 
 
-def create_server(state: ServerState | None = None) -> FastMCP:
-    """Create a FastMCP server instance with all tools registered."""
+def create_server(state: ServerState | None = None) -> MCPServer:
+    """Create a MCPServer instance with all tools registered."""
     if not _HAS_MCP:
         raise RuntimeError("mcp package not installed. Run: pip install mcp")
 
@@ -2252,28 +1916,27 @@ def create_server(state: ServerState | None = None) -> FastMCP:
     if state is not None:
         _server_state = state
 
-    mcp = FastMCP(
+    mcp = MCPServer(
         "Model Forge",
         instructions=(
             "QGIS Processing model generation via the Model Forge "
             "compiler pipeline. Tools are chained: list_layers → "
             "list_algorithms → get_algorithm_info → generate_model → "
-            "export_model, and for layout: generate_symbology → "
-            "generate_print_layout → verify_layout → export_layout."
+            "export_model."
         ),
+        version=__version__,
     )
 
     _register_context_tools(mcp)
     _register_algorithm_tools(mcp)
     _register_generation_tools(mcp)
-    _register_map_tools(mcp)
     _register_management_tools(mcp)
 
     try:
         from .prompts import register_prompts
 
         register_prompts(mcp)
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.debug("Prompt registration failed", exc_info=True)
 
     @mcp.resource("model-forge://server-info")
@@ -2337,7 +2000,7 @@ def start_server(
     ssl_certfile: str | None = None,
     ssl_keyfile: str | None = None,
     shutdown_timeout: float = 15.0,
-) -> FastMCP:
+) -> MCPServer:
     """Start the MCP server in a background thread (SSE mode) or return it for stdio.
 
     Parameters
@@ -2386,8 +2049,6 @@ def start_server(
     _server_shutdown_timeout = max(0.0, float(shutdown_timeout))
 
     mcp = create_server(state)
-    mcp.settings.host = host
-    mcp.settings.port = port
 
     if transport == "stdio":
         _server_instance = mcp
@@ -2401,7 +2062,7 @@ def start_server(
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            app = mcp.sse_app()
+            app = mcp.sse_app(host=host)
             if auth_token:
                 app = _wrap_with_token_auth(app, auth_token)
             config_kwargs: dict[str, Any] = {
@@ -2453,7 +2114,7 @@ def stop_server():
     if _server_uvicorn is not None:
         try:
             _server_uvicorn.shutdown()
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.debug("uvicorn.shutdown() raised", exc_info=True)
         import contextlib
 
@@ -2467,7 +2128,7 @@ def stop_server():
         from .jobs import reset_registry
 
         reset_registry()
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.debug("Job registry shutdown failed", exc_info=True)
 
     _server_instance = None

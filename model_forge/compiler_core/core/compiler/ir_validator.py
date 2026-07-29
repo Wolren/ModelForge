@@ -31,7 +31,11 @@ class IRValidator:
 
             # Check child_output references point to existing steps
             for pname, binding in step.parameters.items():
-                if binding.source_type == "child_output" and binding.child_id and binding.child_id not in step_ids:
+                if (
+                    binding.source_type == "child_output"
+                    and binding.child_id
+                    and binding.child_id not in step_ids
+                ):
                         plan.issues.append(
                             PlanIssue(
                                 level=IssueLevel.ERROR,
@@ -83,15 +87,15 @@ class IRValidator:
             ]
             adj[step.step_id] = deps
 
-        WHITE, GRAY, BLACK = 0, 1, 2
-        color: dict[str, int] = {s.step_id: WHITE for s in plan.steps}
+        white, gray, black = 0, 1, 2
+        color: dict[str, int] = {s.step_id: white for s in plan.steps}
 
-        def _dfs(node: str, path: list[str]) -> None:
-            color[node] = GRAY
+        def dfs(node: str, path: list[str]) -> None:
+            color[node] = gray
             for dep in adj.get(node, []):
                 if dep not in color:
                     continue
-                if color[dep] == GRAY:
+                if color[dep] == gray:
                     cycle = path + [dep]
                     plan.issues.append(
                         PlanIssue(
@@ -102,10 +106,10 @@ class IRValidator:
                         )
                     )
                     return
-                if color[dep] == WHITE:
-                    _dfs(dep, path + [dep])
-            color[node] = BLACK
+                if color[dep] == white:
+                    dfs(dep, path + [dep])
+            color[node] = black
 
         for step in plan.steps:
-            if color[step.step_id] == WHITE:
-                _dfs(step.step_id, [step.step_id])
+            if color[step.step_id] == white:
+                dfs(step.step_id, [step.step_id])

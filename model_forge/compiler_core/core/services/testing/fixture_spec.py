@@ -13,18 +13,18 @@ from dataclasses import dataclass, field
 from typing import Any
 
 try:
-    import processing  # noqa: F401
+    import processing
     from qgis.core import (
-        QgsCoordinateReferenceSystem,  # noqa: F401
-        QgsFeature,  # noqa: F401
-        QgsField,  # noqa: F401
-        QgsFields,  # noqa: F401
-        QgsGeometry,  # noqa: F401
-        QgsProcessingContext,  # noqa: F401
-        QgsProcessingException,  # noqa: F401
-        QgsProcessingFeedback,  # noqa: F401
-        QgsVectorLayer,  # noqa: F401
-        QgsWkbTypes,  # noqa: F401
+        QgsCoordinateReferenceSystem,
+        QgsFeature,
+        QgsField,
+        QgsFields,
+        QgsGeometry,
+        QgsProcessingContext,
+        QgsProcessingException,
+        QgsProcessingFeedback,
+        QgsVectorLayer,
+        QgsWkbTypes,
     )
 
     _HAS_QGIS = True

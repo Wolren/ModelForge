@@ -49,7 +49,8 @@ class ForgeWidgetLayoutMixin:
         self.chk_optimize = QCheckBox("Optimize auto-fix")
         self.chk_optimize.setChecked(True)
         self.chk_optimize.setToolTip(
-            "Automatically retries with tighter prompts and reduced context to avoid timeouts/errors."
+            "Automatically retries with tighter prompts and reduced context "
+            "to avoid timeouts/errors."
         )
         compiler_actions.addWidget(self.chk_optimize)
         compiler_actions.addStretch()

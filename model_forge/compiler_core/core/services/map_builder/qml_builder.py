@@ -361,6 +361,6 @@ def _coerce_symbol(symbol: dict[str, Any] | None, geometry_kind: str) -> SymbolD
 
 
 __all__ = [
-    "build_qml",
     "DEFAULT_VECTOR_PALETTE",
+    "build_qml",
 ]

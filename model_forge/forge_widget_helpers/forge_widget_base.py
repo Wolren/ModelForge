@@ -179,7 +179,7 @@ class ForgeWidget(QWidget):
             from qgis.PyQt.QtCore import QTimer
 
             QTimer.singleShot(500, self._auto_probe_llm)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         self.worker = None
 
@@ -458,7 +458,7 @@ class ForgeWidget(QWidget):
 
         bg_layout.addWidget(QLabel("Thinking level:"), 4, 0)
         thinking_layout = QHBoxLayout()
-        self.sld_temperature = QSlider(Qt.Horizontal)
+        self.sld_temperature = QSlider(Qt.Orientation.Horizontal)
         self.sld_temperature.setMinimum(0)
         self.sld_temperature.setMaximum(10)
         self.sld_temperature.setValue(2)
@@ -588,7 +588,7 @@ class ForgeWidget(QWidget):
         self.layer_list.clear()
         for layer in QgsProject.instance().mapLayers().values():
             item = QListWidgetItem(layer.name())
-            item.setData(Qt.UserRole, layer)
+            item.setData(Qt.ItemDataRole.UserRole, layer)
             self.layer_list.addItem(item)
             item.setSelected(True)
 
@@ -607,7 +607,7 @@ class ForgeWidget(QWidget):
 
     def _get_selected_layers(self):
         return [
-            self.layer_list.item(i).data(Qt.UserRole)
+            self.layer_list.item(i).data(Qt.ItemDataRole.UserRole)
             for i in range(self.layer_list.count())
             if self.layer_list.item(i).isSelected()
         ]
@@ -656,7 +656,7 @@ class ForgeWidget(QWidget):
         """
         try:
             ok = self.backend.test_connection()
-        except Exception:  # noqa: BLE001
+        except Exception:
             ok = False
         if ok:
             self._set_llm_status(
@@ -938,7 +938,7 @@ class ForgeWidget(QWidget):
                 open_designer=False,
             )
 
-            tmp = tempfile.NamedTemporaryFile(suffix=".model3", delete=False)  # noqa: SIM115 - need delete=False, context manager would clean up before use
+            tmp = tempfile.NamedTemporaryFile(suffix=".model3", delete=False)
             tmp_path = tmp.name
             tmp.close()
 

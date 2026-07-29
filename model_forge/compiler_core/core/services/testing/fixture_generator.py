@@ -6,10 +6,10 @@ from .fixture_runner import CompleteFixtureService, FixtureRunner
 from .fixture_spec import FixtureGeneratorService, FixtureResult, FixtureSpec, TestSuite
 
 __all__ = [
+    "CompleteFixtureService",
     "FixtureGeneratorService",
-    "FixtureSpec",
-    "TestSuite",
     "FixtureResult",
     "FixtureRunner",
-    "CompleteFixtureService",
+    "FixtureSpec",
+    "TestSuite",
 ]

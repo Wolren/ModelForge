@@ -460,7 +460,7 @@ def verify_qpt(qpt_xml: str) -> VerificationReport:
     """Run all rules against a .qpt XML document."""
     try:
         qpt = parse_qpt(qpt_xml)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return VerificationReport(
             template="unknown",
             page_size_mm=(0.0, 0.0),
@@ -487,7 +487,7 @@ def verify_qpt(qpt_xml: str) -> VerificationReport:
     for rule in RULES:
         try:
             vs = rule(qpt)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             vs = [
                 Violation(
                     code="E_RULE_ERROR",
@@ -575,7 +575,7 @@ def _page_aspect_ratio(spec: LayoutSpec) -> list[Violation]:
     that as a warning so the LLM knows the layout is using a
     non-standard size.
     """
-    from .pipeline import PAGE_SIZES_MM as _  # noqa: F401, N811  (avoid circular)
+    from .pipeline import PAGE_SIZES_MM as _
     from .style_templates import PAGE_SIZES_MM
 
     for _key, (w, h) in PAGE_SIZES_MM.items():
@@ -1051,7 +1051,7 @@ def verify_layout_spec(
     for rule in SPEC_RULES:
         try:
             vs = rule(spec)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             vs = [
                 Violation(
                     code="E_RULE_ERROR",
@@ -1068,10 +1068,10 @@ def verify_layout_spec(
 
 
 __all__ = [
-    "Violation",
-    "VerificationReport",
-    "verify_qpt",
-    "verify_layout_spec",
     "RULES",
     "SPEC_RULES",
+    "VerificationReport",
+    "Violation",
+    "verify_layout_spec",
+    "verify_qpt",
 ]

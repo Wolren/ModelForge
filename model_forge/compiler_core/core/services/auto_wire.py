@@ -155,7 +155,7 @@ def _preferred_output_name(qgs_alg: Any | None) -> str:
         if outputs:
             by_name = {str(odef.name() or "").upper(): str(odef.name() or "") for odef in outputs}
             for key in _PREFERRED_OUTPUT_NAMES:
-                if key in by_name and by_name[key]:
+                if by_name.get(key):
                     return by_name[key]
             return str(outputs[0].name() or "OUTPUT")
     return "OUTPUT"

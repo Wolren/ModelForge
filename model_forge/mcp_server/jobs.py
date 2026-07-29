@@ -45,10 +45,10 @@ from .errors import TimeoutError as MfTimeoutError
 
 # Re-export for callers that import the alias from this module.
 __all__ = [
+    "CancelledError",
     "Job",
     "JobRegistry",
     "MfTimeoutError",
-    "CancelledError",
     "ProgressCallback",
     "check_cancellation",
     "get_registry",
@@ -201,7 +201,7 @@ class JobRegistry:
             if on_progress is not None:
                 try:
                     on_progress(current, total, message)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     log.debug("progress callback failed", exc_info=True)
 
         def _runner() -> Any:
@@ -226,7 +226,7 @@ class JobRegistry:
                 job.status = "cancelled"
                 job.error = e.message
                 raise
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 # If the cancel event was set, the failure is almost
                 # certainly a downstream consequence of the cancel.
                 if cancel_event.is_set():
@@ -368,8 +368,8 @@ async def run_in_thread(
         # can short-circuit on its next progress poll.
         # The JobRegistry doesn't know our future; we just iterate
         # active jobs and set the event for the most recent one.
-        with registry._lock:  # noqa: SLF001 - intentional
-            for job in registry._jobs.values():  # noqa: SLF001
+        with registry._lock:
+            for job in registry._jobs.values():
                 if job.future is not None and not job.future.done():
                     job.cancel_event.set()
                     break
@@ -404,5 +404,5 @@ def report_progress(
     if callback is not None:
         try:
             callback(current, total, message)
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.debug("progress callback raised", exc_info=True)

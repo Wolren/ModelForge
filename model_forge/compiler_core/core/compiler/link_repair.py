@@ -647,11 +647,11 @@ class LinkRepairService:
             ]
             adj[step.step_id] = deps
 
-        WHITE, GRAY, BLACK = 0, 1, 2
-        color: dict[str, int] = {s.step_id: WHITE for s in plan.steps}
+        white, gray, black = 0, 1, 2
+        color: dict[str, int] = {s.step_id: white for s in plan.steps}
 
         def dfs(node: str, path: list[str]) -> None:
-            color[node] = GRAY
+            color[node] = gray
             for dep in adj.get(node, []):
                 if dep not in color:
                     continue

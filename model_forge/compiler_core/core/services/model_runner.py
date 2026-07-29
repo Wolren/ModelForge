@@ -195,7 +195,7 @@ def run_model(
                 step.status = "cancelled"
                 step.error = "Cancelled before completion."
                 report.cancelled = True
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 step.status = "failed"
                 step.error = f"{type(e).__name__}: {e}"
                 step.traceback = traceback.format_exc()
@@ -228,7 +228,7 @@ def _mark_cancelled(results: dict[str, StepResult]) -> None:
             r.status = "cancelled"
 
 
-class _Cancelled(Exception):  # noqa: N818
+class _Cancelled(Exception):
     """Internal sentinel; not exported."""
 
 
@@ -350,7 +350,7 @@ def _execute_with_retries(
             raise _Cancelled()
         try:
             return dict(processing.run(algorithm_id, inputs)), attempt + 1
-        except Exception:  # noqa: BLE001
+        except Exception:
             if attempt < max_retries:
                 _t.sleep(min(0.5 * (2**attempt), 2.0))
                 continue
@@ -373,7 +373,7 @@ def _idempotency_key(alg: dict[str, Any], inputs: dict[str, Any]) -> str:
 
 
 __all__ = [
-    "StepResult",
     "ModelRunReport",
+    "StepResult",
     "run_model",
 ]

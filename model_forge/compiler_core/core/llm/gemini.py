@@ -37,6 +37,10 @@ from typing import Any
 
 from .base import LLMBackend, LLMRequestError, LLMResponseError, LLMTimeoutError
 
+# HTTP status code ranges for retryable errors
+_HTTP_5XX_START = 500
+_HTTP_5XX_END = 600
+
 
 class GeminiLLMBackend(LLMBackend):
     def __init__(
@@ -128,7 +132,7 @@ class GeminiLLMBackend(LLMBackend):
                     continue
                 raise last_exc from e
             except urllib.error.HTTPError as e:
-                if e.code in (408, 425, 429) or 500 <= e.code < 600:
+                if e.code in (408, 425, 429) or _HTTP_5XX_START <= e.code < _HTTP_5XX_END:
                     last_exc = LLMRequestError(f"Gemini HTTP {e.code}: {e.reason}")
                     if attempt < self.max_retries:
                         time.sleep(min(0.5 * (2**attempt), 2.0))
@@ -153,7 +157,7 @@ class GeminiLLMBackend(LLMBackend):
                     raise LLMResponseError("Gemini response contained no text part.")
                 except LLMResponseError:
                     raise
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     raise LLMResponseError(f"Gemini response missing expected content: {e}") from e
 
         raise LLMRequestError(

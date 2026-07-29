@@ -63,7 +63,7 @@ class CompilerPipeline:
           ``total`` are floats in [0, 1] where 1.0 means done.
         """
 
-        STAGE_FRACTIONS = {
+        stage_fractions = {
             "intent": 0.10,
             "plan": 0.30,
             "resolve": 0.55,
@@ -77,7 +77,7 @@ class CompilerPipeline:
         def _emit(stage: str, message: str) -> None:
             if progress_callback is None:
                 return
-            frac = STAGE_FRACTIONS.get(stage, 0.0)
+            frac = stage_fractions.get(stage, 0.0)
             try:
                 # Try the structured signature first.
                 progress_callback(frac, 1.0, message)

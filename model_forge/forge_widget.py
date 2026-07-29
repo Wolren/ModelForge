@@ -18,9 +18,6 @@ from model_forge.forge_widget_helpers.forge_widget_history import (
     ForgeWidgetHistoryMixin,
 )
 from model_forge.forge_widget_helpers.forge_widget_layout import ForgeWidgetLayoutMixin
-from model_forge.forge_widget_helpers.forge_widget_map import (
-    ForgeWidgetMapMixin,
-)
 
 from .compiler_core.core.ir import IssueLevel
 from .compiler_core.ui.custom_step_dialog import CustomStepDialog
@@ -31,7 +28,6 @@ from .forge_generate_worker import ForgeGenerateWorker
 class ForgeWidget(
     ForgeWidgetLayoutMixin,
     ForgeWidgetHistoryMixin,
-    ForgeWidgetMapMixin,
     LegacyForgeWidget,
 ):
     def __init__(self, iface, plugin=None, parent=None):
@@ -45,8 +41,6 @@ class ForgeWidget(
         self._inject_compiler_controls()
         self._inject_history_tab()
         self._refresh_history_list()
-        if hasattr(self, "_inject_map_tab"):
-            self._inject_map_tab()
         self.btn_cancel.clicked.connect(self._on_cancel_generate)
 
     def _load_compiler_settings(self):
@@ -186,9 +180,11 @@ class ForgeWidget(
             f"warnings: {counts.get('warning', 0)}, "
             f"info: {counts.get('info', 0)}"
         )
-        details = "\n".join(lines[:4])
-        if len(lines) > 4:
-            details += f"\n...and {len(lines) - 4} more."
+        # How many issue lines to show before truncating
+        _MAX_ISSUE_LINES = 4
+        details = "\n".join(lines[:_MAX_ISSUE_LINES])
+        if len(lines) > _MAX_ISSUE_LINES:
+            details += f"\n...and {len(lines) - _MAX_ISSUE_LINES} more."
 
         self.lbl_pipeline_issues.setText(f"{summary}\n{details}")
         self.lbl_pipeline_issues.setStyleSheet(

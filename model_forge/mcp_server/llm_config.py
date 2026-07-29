@@ -211,7 +211,7 @@ def load_config() -> dict[str, Any]:
     try:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.warning("Failed to read config %s: %s", path, e)
         return {}
 
@@ -227,6 +227,12 @@ def save_config(cfg: dict[str, Any]) -> None:
         os.makedirs(parent, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, sort_keys=True)
+    # Restrict file permissions on POSIX systems so the API key in the
+    # config file is not world-readable.
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass  # Best-effort on platforms without chmod (Windows)
     log.info("Saved config to %s", path)
 
 

@@ -26,8 +26,11 @@ class ForgeWidgetHistoryMixin:
         self.lst_history = QListWidget()
         self.lst_history.setSelectionMode(QListWidget.SingleSelection)
         self.lst_history.setStyleSheet(
-            "QListWidget::item { padding: 8px; margin: 4px; border: 1px solid #4a4a4a; border-radius: 6px; }"
-            "QListWidget::item:selected { background: #2b3a55; border: 1px solid #6a8ac7; }"
+            "QListWidget::item {"
+            " padding: 8px; margin: 4px;"
+            " border: 1px solid #4a4a4a; border-radius: 6px; }"
+            "QListWidget::item:selected {"
+            " background: #2b3a55; border: 1px solid #6a8ac7; }"
         )
         history_layout.addWidget(self.lst_history, stretch=1)
 
@@ -98,11 +101,12 @@ class ForgeWidgetHistoryMixin:
                 f"{entry.get('timestamp', '?')} | "
                 f"{entry.get('model_name', 'workflow')} "
                 f"({entry.get('algorithm_count', 0)} steps)\n"
-                f"layout={entry.get('layout_profile', 'balanced')}/{entry.get('layout_orientation', 'horizontal')}/"
+                f"layout={entry.get('layout_profile', 'balanced')}/"
+                f"{entry.get('layout_orientation', 'horizontal')}/"
                 f"{entry.get('layout_algorithm', 'sugiyama')}"
             )
             item = QListWidgetItem(text)
-            item.setData(Qt.UserRole, idx)
+            item.setData(Qt.ItemDataRole.UserRole, idx)
             item.setSizeHint(QSize(0, 68))
             self.lst_history.addItem(item)
 
@@ -110,7 +114,7 @@ class ForgeWidgetHistoryMixin:
         item = self.lst_history.currentItem() if hasattr(self, "lst_history") else None
         if item is None:
             return None
-        idx = item.data(Qt.UserRole)
+        idx = item.data(Qt.ItemDataRole.UserRole)
         if idx is None or idx < 0 or idx >= len(self._history_entries):
             return None
         return idx

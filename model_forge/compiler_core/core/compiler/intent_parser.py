@@ -24,7 +24,10 @@ class IntentParser:
         r"\b(EPSG:\d+|WGS\s*84|ETRS\s*89|PUWG\s*(?:92|2000)|UTM\s*zone\s*\d+\w*)\b",
         re.IGNORECASE,
     )
-    _DISTANCE_PATTERN = re.compile(r"\b(\d+(?:\.\d+)?)\s*(m|km|meters?|kilometres?)\b", re.IGNORECASE)
+    _DISTANCE_PATTERN = re.compile(
+        r"\b(\d+(?:\.\d+)?)\s*(m|km|meters?|kilometres?)\b",
+        re.IGNORECASE,
+    )
 
     def parse(self, raw_text: str) -> RawIntent:
         cleaned = raw_text.strip()

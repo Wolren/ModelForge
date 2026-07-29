@@ -6,6 +6,7 @@ display so the user at least sees the diagram code.
 
 from __future__ import annotations
 
+import importlib
 import logging
 import os
 
@@ -15,19 +16,16 @@ from qgis.PyQt.QtWidgets import QPlainTextEdit, QVBoxLayout, QWidget
 _HAS_WEBENGINE = False
 QWebEngineView = None
 for mod in (
-    "qgis.PyQt.QtWebEngineWidgets.QWebEngineView",
-    "PyQt5.QtWebEngineWidgets.QWebEngineView",
-    "PyQt6.QtWebEngineWidgets.QWebEngineView",
+    "qgis.PyQt.QtWebEngineWidgets",
+    "PyQt5.QtWebEngineWidgets",
+    "PyQt6.QtWebEngineWidgets",
 ):
     try:
-        parts = mod.split(".")
-        exec(
-            f"from {'.'.join(parts[:-1])} import {parts[-1]}",
-            globals(),
-        )
+        web_mod = importlib.import_module(mod)
+        QWebEngineView = web_mod.QWebEngineView
         _HAS_WEBENGINE = True
         break
-    except ImportError:
+    except (ImportError, AttributeError):
         continue
 
 log = logging.getLogger(__name__)
@@ -63,7 +61,7 @@ class MermaidGraphView(QWidget):
                 self._view.setParent(self)
                 layout.addWidget(self._view)
                 self.setLayout(layout)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 self._view = None
 
         if self._view is None:

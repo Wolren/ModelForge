@@ -123,7 +123,7 @@ def test_server_state_refresh_under_lock(server_module):
         try:
             for _ in range(50):
                 state.refresh()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             errors.append(e)
 
     threads = [threading.Thread(target=_hammer) for _ in range(4)]

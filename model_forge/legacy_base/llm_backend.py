@@ -418,7 +418,7 @@ class LLMBackend:
         )
         try:
             result = self._call_llm_with_image(SYSTEM_PROMPT_LAYOUT_DESIGN, user_msg, image_path)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return self._layout_design_fallback(intent)
         if not isinstance(result, dict):
             return self._layout_design_fallback(intent)
@@ -474,7 +474,7 @@ class LLMBackend:
             return {"status": "ok", "fixes": [], "message": ""}
         try:
             result = self._call_llm(SYSTEM_PROMPT_LAYOUT_EVAL, spec_summary)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return {"status": "ok", "fixes": [], "message": ""}
         if not isinstance(result, dict):
             return {"status": "ok", "fixes": [], "message": ""}
@@ -555,7 +555,7 @@ class LLMBackend:
             if not _os.path.isfile(image_path):
                 return {"status": "ok", "fixes": [], "message": ""}
             result = self._call_llm_with_image(system_prompt, user_msg, image_path)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return {"status": "ok", "fixes": [], "message": ""}
         if not isinstance(result, dict):
             return {"status": "ok", "fixes": [], "message": ""}

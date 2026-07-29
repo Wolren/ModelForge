@@ -15,7 +15,7 @@ try:
         QHBoxLayout,
         QLabel,
         QLineEdit,
-        QPushButton,  # noqa: F401
+        QPushButton,
         QVBoxLayout,
     )
 

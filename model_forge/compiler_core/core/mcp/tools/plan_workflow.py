@@ -17,7 +17,8 @@ include any prose, code fences, or commentary.
     {
       "step_id":        "<snake_case, unique across all steps>",
       "label":          "<short human-readable label, same language as the user goal>",
-      "intent":         "<verb phrase: e.g. 'Buffer the input by 50m', 'Extract by attribute', 'Reproject to EPSG:4326'>",
+      "intent":         "<verb phrase: e.g. 'Buffer the input by 50m', "
+                        "'Extract by attribute', 'Reproject to EPSG:4326'>",
       "algorithm_id":   "<provider:algorithm or null if uncertain>",
       "inputs":         ["<step_id of an earlier step, or a model_input name>"],
       "outputs":        ["<output port name; use 'OUTPUT' if unsure>"],
@@ -85,7 +86,10 @@ Response:
       "algorithm_id": "native:buffer",
       "inputs": ["roads"],
       "outputs": ["OUTPUT"],
-      "constraints": {"DISTANCE": 50, "SEGMENTS": 8, "END_CAP_STYLE": 0, "JOIN_STYLE": 0, "MITER_LIMIT": 2},
+      "constraints": {
+        "DISTANCE": 50, "SEGMENTS": 8, "END_CAP_STYLE": 0,
+        "JOIN_STYLE": 0, "MITER_LIMIT": 2
+      },
       "needs_review": false
     },
     {

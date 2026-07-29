@@ -1,4 +1,3 @@
-# ruff: noqa: E402
 """
 Model Forge QGIS Integration Test
 Run this from QGIS Python Console:  exec(open(r'PATH/TO/test_qgis_integration.py').read())
@@ -8,7 +7,7 @@ Or save as Processing script and run from toolbox.
 import sys
 
 try:
-    import qgis.core  # noqa: F401
+    import qgis.core
 except ImportError:
     import pytest
 

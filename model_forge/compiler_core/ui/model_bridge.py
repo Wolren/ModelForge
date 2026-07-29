@@ -546,7 +546,7 @@ if _HAS_QGIS:
             preferred = ("OUTPUT", "RESULT", "OUTPUT_LAYER", "OUTPUT_TABLE", "OUTPUT_VECTOR")
             by_name = {str(odef.name() or "").upper(): str(odef.name() or "") for odef in outputs}
             for key in preferred:
-                if key in by_name and by_name[key]:
+                if by_name.get(key):
                     return by_name[key]
 
             first = str(outputs[0].name() or "")

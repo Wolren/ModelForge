@@ -412,16 +412,16 @@ def template_to_dict(t: PrintTemplate) -> dict[str, Any]:
 
 
 __all__ = [
-    "PAGE_SIZES_MM",
+    "DEFAULT_SYMBOLS",
     "DEFAULT_TEMPLATES",
     "DEFAULT_VECTOR_PALETTE",
-    "DEFAULT_SYMBOLS",
+    "NORTH_ARROW_SVGS",
+    "PAGE_SIZES_MM",
+    "VERIFIER_LIMITS",
     "PrintTemplate",
     "SymbolDefaults",
     "VerifierLimits",
-    "VERIFIER_LIMITS",
-    "NORTH_ARROW_SVGS",
-    "get_template",
     "get_symbol_defaults",
+    "get_template",
     "template_to_dict",
 ]

@@ -18,7 +18,7 @@ class ForgeDock(QDockWidget):
         super().__init__("Model Forge", parent)
         self.iface = iface
         self.plugin = plugin
-        self.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
         self.setMinimumWidth(420)
         main_widget = QWidget()
         layout = QVBoxLayout()

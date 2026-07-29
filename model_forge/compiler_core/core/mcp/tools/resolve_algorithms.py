@@ -22,7 +22,7 @@ Return a single JSON object with NO markdown, NO code fences, NO prose.
   "resolved_steps": [
     {
       "step_id":       "<matches the planner's step_id>",
-      "algorithm_id":  "<provider:base; keep the planner's choice if it resolves to a real algorithm>",
+      "algorithm_id":  "<provider:base; keep planner's choice, resolve to real alg>",
       "confidence":    0.0,
       "status":        "resolved|assumed|blocked",
       "reason":        "<one sentence, only if status is blocked>",

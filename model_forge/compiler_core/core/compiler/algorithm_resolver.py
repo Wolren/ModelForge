@@ -61,6 +61,11 @@ _COMMON_NATIVE_ALGORITHMS = {
 }
 
 
+# Confidence thresholds for algorithm resolution
+_HIGH_CONFIDENCE_THRESHOLD = 0.6
+_LOW_CONFIDENCE_THRESHOLD = 0.3
+
+
 class AlgorithmResolver:
     def __init__(self, registry_catalog=None):
         """
@@ -302,12 +307,12 @@ class AlgorithmResolver:
 
     @staticmethod
     def _should_warn_low_confidence(alg_id: str, confidence: float) -> bool:
-        if confidence >= 0.6:
+        if confidence >= _HIGH_CONFIDENCE_THRESHOLD:
             return False
         if not alg_id.startswith("native:"):
             return True
 
         suffix = alg_id.split(":", 1)[-1].lower()
         if suffix in _COMMON_NATIVE_ALGORITHMS:
-            return confidence < 0.3
+            return confidence < _LOW_CONFIDENCE_THRESHOLD
         return True

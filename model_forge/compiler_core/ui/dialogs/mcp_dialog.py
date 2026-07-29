@@ -8,14 +8,14 @@ Uses native QGIS/Qt widgets throughout - no extra UI framework needed.
 from __future__ import annotations
 
 try:
-    from qgis.PyQt.QtCore import Qt, QThread, pyqtSignal  # noqa: F401
+    from qgis.PyQt.QtCore import Qt, QThread, pyqtSignal
     from qgis.PyQt.QtGui import QFont
     from qgis.PyQt.QtWidgets import (
-        QCheckBox,  # noqa: F401
+        QCheckBox,
         QComboBox,
         QDialog,
-        QDialogButtonBox,  # noqa: F401
-        QDoubleSpinBox,  # noqa: F401
+        QDialogButtonBox,
+        QDoubleSpinBox,
         QGroupBox,
         QHBoxLayout,
         QLabel,
@@ -24,8 +24,8 @@ try:
         QPlainTextEdit,
         QProgressBar,
         QPushButton,
-        QSpinBox,  # noqa: F401
-        QSplitter,  # noqa: F401
+        QSpinBox,
+        QSplitter,
         QTabWidget,
         QTextBrowser,
         QVBoxLayout,
