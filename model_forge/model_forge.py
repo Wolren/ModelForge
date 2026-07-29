@@ -13,8 +13,7 @@ import os
 import sys
 
 from qgis.PyQt.QtCore import QCoreApplication, Qt
-from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtGui import QAction
+from qgis.PyQt.QtGui import QAction, QIcon
 
 from .compiler_core.log import configure_logger
 from .forge_dock import ForgeDock

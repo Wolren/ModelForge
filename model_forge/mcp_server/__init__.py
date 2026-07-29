@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from .llm_config import SCHEMA_VERSION
+
 _HAS_MCP = False
 try:
-    from mcp.server.mcpserver import MCPServer
+    import mcp.server.mcpserver  # noqa: F401
 
     _HAS_MCP = True
 except ImportError:
@@ -12,17 +14,13 @@ except ImportError:
 
 _HAS_QGIS = False
 try:
-    from qgis.core import QgsApplication, QgsProject
+    import qgis.core  # noqa: F401
 
     _HAS_QGIS = True
 except ImportError:
     pass
 
 __version__ = "1.0.1"
-
-# Re-exported here so callers can ``from model_forge.mcp_server import SCHEMA_VERSION``
-# without an import cycle. The canonical value lives in ``llm_config``.
-from .llm_config import SCHEMA_VERSION
 
 __all__ = [
     "SCHEMA_VERSION",

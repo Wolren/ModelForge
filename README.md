@@ -1,10 +1,10 @@
 [![CI](https://github.com/Wolren/ModelForge/actions/workflows/ci.yml/badge.svg)](https://github.com/Wolren/ModelForge/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Wolren/ModelForge/badge)](https://securityscorecards.dev/viewer/?uri=github.com/Wolren/ModelForge)
-[![Socket](https://img.shields.io/badge/Socket-Supply%20Chain%20Security-333?logo=socketdotdev)](https://socket.dev)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![QGIS 3.22+](https://img.shields.io/badge/QGIS-3.22+-green)](https://qgis.org)
 [![Qt](https://img.shields.io/badge/Qt-5.x_|_6.x-green)](https://www.qt.io/)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Wolren/ModelForge/badge)](https://securityscorecards.dev/viewer/?uri=github.com/Wolren/ModelForge)
+[![Socket](https://img.shields.io/badge/Socket-Supply%20Chain%20Security-333?logo=socketdotdev)](https://socket.dev)
 
 # Model Forge
 

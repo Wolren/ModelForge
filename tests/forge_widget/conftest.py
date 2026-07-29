@@ -115,7 +115,7 @@ def _stub_qgis(monkeypatch: pytest.MonkeyPatch) -> None:
     # as an attribute of ``Qt``; the stub mirrors that.
     class _Qt:
         red = object()  # sentinel - the value doesn't matter for the stub
-        darkGreen = object()
+        darkGreen = object()  # noqa: N815
 
     qtcore.Qt = _Qt
     qtcore.QThread = type("QThread", (), {})

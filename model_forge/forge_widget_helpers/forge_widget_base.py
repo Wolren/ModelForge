@@ -938,9 +938,8 @@ class ForgeWidget(QWidget):
                 open_designer=False,
             )
 
-            tmp = tempfile.NamedTemporaryFile(suffix=".model3", delete=False)
-            tmp_path = tmp.name
-            tmp.close()
+            with tempfile.NamedTemporaryFile(suffix=".model3", delete=False) as tmp:
+                tmp_path = tmp.name
 
             try:
                 if not model.toFile(tmp_path):

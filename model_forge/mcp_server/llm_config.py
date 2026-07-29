@@ -22,6 +22,7 @@ Providers supported:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import urllib.error
@@ -229,10 +230,8 @@ def save_config(cfg: dict[str, Any]) -> None:
         json.dump(cfg, f, indent=2, sort_keys=True)
     # Restrict file permissions on POSIX systems so the API key in the
     # config file is not world-readable.
-    try:
+    with contextlib.suppress(OSError):
         os.chmod(path, 0o600)
-    except OSError:
-        pass  # Best-effort on platforms without chmod (Windows)
     log.info("Saved config to %s", path)
 
 

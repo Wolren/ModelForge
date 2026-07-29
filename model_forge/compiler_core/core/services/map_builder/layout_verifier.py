@@ -575,7 +575,6 @@ def _page_aspect_ratio(spec: LayoutSpec) -> list[Violation]:
     that as a warning so the LLM knows the layout is using a
     non-standard size.
     """
-    from .pipeline import PAGE_SIZES_MM as _
     from .style_templates import PAGE_SIZES_MM
 
     for _key, (w, h) in PAGE_SIZES_MM.items():

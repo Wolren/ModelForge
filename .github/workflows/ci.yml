@@ -30,13 +30,13 @@ jobs:
             exit 1
           fi
           grep -q "^name=" $PLUGIN_DIR/metadata.txt \
-            || echo "::warning file=$PLUGIN_DIR/metadata.txt::Missing 'name'"
+            || { echo "::error file=$PLUGIN_DIR/metadata.txt::Missing 'name'"; exit 1; }
           grep -q "^version=" $PLUGIN_DIR/metadata.txt \
-            || echo "::warning file=$PLUGIN_DIR/metadata.txt::Missing 'version'"
+            || { echo "::error file=$PLUGIN_DIR/metadata.txt::Missing 'version'"; exit 1; }
           grep -q "^qgisMinimumVersion=" $PLUGIN_DIR/metadata.txt \
-            || echo "::warning::Missing 'qgisMinimumVersion'"
+            || { echo "::error::Missing 'qgisMinimumVersion'"; exit 1; }
           grep -q "^description=" $PLUGIN_DIR/metadata.txt \
-            || echo "::warning::Missing 'description'"
+            || { echo "::error::Missing 'description'"; exit 1; }
           echo "metadata.txt validation complete"
 
   package:
@@ -75,6 +75,7 @@ jobs:
         qgis_version:
           - "3.22-focal"
           - "stable"
+          - "4.2-trixie"
           - "latest"
     steps:
       - uses: actions/checkout@v7
@@ -87,12 +88,98 @@ jobs:
           plugin_dir = os.environ["PLUGIN_DIR"]
           plugin_path = os.path.join("/plugin", plugin_dir)
           sys.path.insert(0, plugin_path)
-          mod = importlib.import_module(plugin_dir)
-          print(f"Plugin loaded: {mod}")
-          for attr in ["classFactory", "metadata", "name"]:
+
+          errors = 0
+
+          # 1. Module import
+          print("=== Plugin import test ===")
+          try:
+              mod = importlib.import_module(plugin_dir)
+              print(f"Plugin loaded: {mod}")
+          except Exception as e:
+              print(f"::error::Plugin import failed: {e}")
+              sys.exit(1)
+
+          # 2. QGIS and Qt version output
+          print()
+          print("=== QGIS / Qt version ===")
+          try:
+              from qgis.core import Qgis
+              print(f"QGIS version: {Qgis.QGIS_VERSION}")
+              print(f"QGIS release: {Qgis.QGIS_RELEASE_NAME}")
+              print(f"QGIS dev version: {Qgis.QGIS_DEV_VERSION}")
+          except Exception as e:
+              print(f"  (qgis.core not available: {e})")
+
+          try:
+              from qgis.PyQt.QtCore import QT_VERSION_STR, PYQT_VERSION_STR
+              print(f"Qt version: {QT_VERSION_STR}")
+              print(f"PyQt version: {PYQT_VERSION_STR}")
+          except Exception as e:
+              print(f"  (Qt not available: {e})")
+
+          # 3. classFactory and lifecycle
+          print()
+          print("=== classFactory / lifecycle ===")
+          if hasattr(mod, "classFactory"):
+              cf = mod.classFactory
+              print(f"classFactory: {cf}")
+              import inspect
+              sig = inspect.signature(cf)
+              params = list(sig.parameters.keys())
+              print(f"  Parameters: {params}")
+              if "iface" not in params:
+                  print("::error::classFactory() missing 'iface' parameter")
+                  errors += 1
+          else:
+              print("::error::Plugin has no classFactory()")
+              errors += 1
+
+          for attr in ["metadata", "name", "icon", "description", "version"]:
               if hasattr(mod, attr):
-                  print(f"  Has {attr}: {getattr(mod, attr)}")
-          print("Import OK")
+                  val = getattr(mod, attr)
+                  print(f"  Plugin.{attr}: {val}")
+              else:
+                  print(f"  Plugin.{attr}: (not set)")
+
+          # 4. Plugin metadata from metadata.txt
+          print()
+          print("=== metadata.txt ===")
+          meta_path = os.path.join(plugin_path, "metadata.txt")
+          if os.path.isfile(meta_path):
+              with open(meta_path) as f:
+                  for line in f:
+                      line = line.strip()
+                      if line and not line.startswith("[") and "=" in line:
+                          print(f"  {line}")
+          else:
+              print("::error::metadata.txt not found in plugin dir")
+              errors += 1
+
+          # 5. Run tests if they exist
+          print()
+          tests_path = "/plugin/tests"
+          if os.path.isdir(tests_path):
+              print("=== Running tests ===")
+              import subprocess
+              result = subprocess.run(
+                  [sys.executable, "-m", "pytest", "tests/", "-v", "--tb=short", "-p", "no:cacheprovider"],
+                  cwd="/plugin",
+                  capture_output=True, text=True
+              )
+              print(result.stdout)
+              if result.stderr:
+                  print(result.stderr)
+              if result.returncode != 0:
+                  print(f"::warning::Some tests failed (exit code {result.returncode})")
+          else:
+              print("No tests/ directory - import check only")
+
+          if errors:
+              print(f"::error::{errors} error(s) found")
+              sys.exit(1)
+          print()
+          print("All checks passed")
           PYEOF
 
           docker run --rm \
@@ -110,15 +197,5 @@ jobs:
               fi
               mkdir -p /root/.local/share/QGIS/QGIS3/profiles/default/python/plugins
               ln -s /plugin/\$PLUGIN_DIR /root/.local/share/QGIS/QGIS3/profiles/default/python/plugins/\$PLUGIN_DIR
-              echo '=== Plugin import test ==='
-              python3 /test_plugin.py || echo '::warning::Plugin import test failed'
-              if [ -d /plugin/tests ]; then
-                echo ''
-                echo '=== Running tests in QGIS ${{ matrix.qgis_version }} ==='
-                cd /plugin
-                python3 -m pytest tests/ -v --tb=short -p no:cacheprovider \
-                  || echo '::warning::Some tests failed in QGIS ${{ matrix.qgis_version }}'
-              else
-                echo 'No tests/ directory - import check only'
-              fi
+              python3 /test_plugin.py
             "

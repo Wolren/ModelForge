@@ -15,7 +15,6 @@ try:
         QHBoxLayout,
         QLabel,
         QLineEdit,
-        QPushButton,
         QVBoxLayout,
     )
 

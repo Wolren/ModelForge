@@ -13,19 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 try:
-    import processing
-    from qgis.core import (
-        QgsCoordinateReferenceSystem,
-        QgsFeature,
-        QgsField,
-        QgsFields,
-        QgsGeometry,
-        QgsProcessingContext,
-        QgsProcessingException,
-        QgsProcessingFeedback,
-        QgsVectorLayer,
-        QgsWkbTypes,
-    )
+    import qgis.core  # noqa: F401
 
     _HAS_QGIS = True
 except ImportError:

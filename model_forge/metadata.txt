@@ -7,9 +7,7 @@ version=1.0.0
 author=Wolren
 email=wolrenn@outlook.com
 license=GPL-3.0-only
-
 about=Self-contained monorepo plugin that fuses the legacy dock workflow UX with the newer MCP compiler, layout service, and custom-step tooling in one distributable package.
-
 tracker=https://github.com/Wolren/ModelForge/issues
 repository=https://github.com/Wolren/ModelForge
 tags=processing,model,AI,MCP,workflow,automation,geoprocessing

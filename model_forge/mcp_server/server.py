@@ -1399,12 +1399,13 @@ def _register_generation_tools(mcp: MCPServer) -> None:
                         ".model3 export requires QGIS. Use 'script' or 'json' format."
                     )
                 )
-            model3_path = (
-                resolved_output_path
-                or tempfile.NamedTemporaryFile(
+            if resolved_output_path:
+                model3_path = resolved_output_path
+            else:
+                with tempfile.NamedTemporaryFile(
                     suffix=".model3", prefix="mf_model_", delete=False
-                ).name
-            )
+                ) as _tf:
+                    model3_path = _tf.name
             try:
                 bridge_path = "model_forge.compiler_core.ui.model_builder_bridge.ModelBuilderBridge"
                 from importlib import import_module

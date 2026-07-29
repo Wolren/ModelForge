@@ -191,7 +191,7 @@ def run_model(
                 step.outputs = outputs or {}
                 step.attempts = attempts
                 step.status = "completed"
-            except _Cancelled:
+            except _CancelledError:
                 step.status = "cancelled"
                 step.error = "Cancelled before completion."
                 report.cancelled = True
@@ -228,7 +228,7 @@ def _mark_cancelled(results: dict[str, StepResult]) -> None:
             r.status = "cancelled"
 
 
-class _Cancelled(Exception):
+class _CancelledError(Exception):
     """Internal sentinel; not exported."""
 
 
@@ -347,7 +347,7 @@ def _execute_with_retries(
 
     for attempt in range(max_retries + 1):
         if cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)():
-            raise _Cancelled()
+            raise _CancelledError()
         try:
             return dict(processing.run(algorithm_id, inputs)), attempt + 1
         except Exception:

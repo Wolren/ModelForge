@@ -7,7 +7,7 @@ Or save as Processing script and run from toolbox.
 import sys
 
 try:
-    import qgis.core
+    import qgis.core as _qc  # noqa: F401
 except ImportError:
     import pytest
 
@@ -25,19 +25,21 @@ def section(title):
 
 # --- 1. Imports ---
 section("1. Import all modules")
-from qgis.core import Qgis, QgsApplication
+from qgis.core import Qgis, QgsApplication  # noqa: E402
 
 print(f"QGIS version: {Qgis.QGIS_VERSION}")
 reg = QgsApplication.processingRegistry()
 providers = [(p.id(), p.name()) for p in reg.providers()]
 print(f"Providers ({len(providers)}): {providers}")
 
-from model_forge.compiler_core.core.compiler.algorithm_resolver import AlgorithmResolver
-from model_forge.compiler_core.core.compiler.ir_validator import IRValidator
-from model_forge.compiler_core.core.compiler.link_repair import LinkRepairService
-from model_forge.compiler_core.core.compiler.model_emitter import ModelEmitter
-from model_forge.compiler_core.core.context_collector import ContextCollector
-from model_forge.compiler_core.core.ir import (
+from model_forge.compiler_core.core.compiler.algorithm_resolver import (  # noqa: E402
+    AlgorithmResolver,
+)
+from model_forge.compiler_core.core.compiler.ir_validator import IRValidator  # noqa: E402
+from model_forge.compiler_core.core.compiler.link_repair import LinkRepairService  # noqa: E402
+from model_forge.compiler_core.core.compiler.model_emitter import ModelEmitter  # noqa: E402
+from model_forge.compiler_core.core.context_collector import ContextCollector  # noqa: E402
+from model_forge.compiler_core.core.ir import (  # noqa: E402
     ExecutablePlan,
     ExecutableStep,
     ModelInput,
@@ -46,7 +48,9 @@ from model_forge.compiler_core.core.ir import (
     ResolvedAlgorithm,
     StepStatus,
 )
-from model_forge.compiler_core.core.services.registry.registry_catalog import RegistryCatalogService
+from model_forge.compiler_core.core.services.registry.registry_catalog import (  # noqa: E402
+    RegistryCatalogService,
+)
 
 print("  ✓ All imports OK")
 
