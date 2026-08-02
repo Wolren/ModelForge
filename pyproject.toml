@@ -1,6 +1,6 @@
 [project]
 name = "model-forge"
-version = "1.0.1"
+version = "1.1.1"
 description = "QGIS plugin converting natural-language geoprocessing descriptions into Processing models"
 license = { text = "GPL-3.0-or-later" }
 requires-python = ">=3.10"
