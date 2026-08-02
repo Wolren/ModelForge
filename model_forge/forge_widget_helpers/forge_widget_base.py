@@ -6,6 +6,7 @@ Model Forge main widget: Generate / Model / Settings tabs.
 - Validation + auto-repair
 - Open in Model Designer
 """
+from __future__ import annotations
 
 import json
 import logging

@@ -4,6 +4,8 @@ Two-phase generation (plan -> build), repair, robust JSON parsing, retry with ba
 Supports Ollama, OpenAI-compatible (DeepSeek, Qwen Cloud, etc.).
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import re

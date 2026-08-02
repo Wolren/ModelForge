@@ -2,6 +2,7 @@
 MCP Tool: resolve_algorithms
 Maps each semantic step intent to a concrete QGIS algorithm_id + bindings.
 """
+from __future__ import annotations
 
 import json
 import re
