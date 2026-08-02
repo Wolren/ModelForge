@@ -16,8 +16,6 @@
 # Catch-all for any SQLite / spatialite databases that
 # QGIS may create in the repo root during testing.
 *.db
-/model_forge/resources/
-/model_forge/resources/*
 
 # ─── IDE / editor ────────────────────────────────────────────────────
 .idea/
