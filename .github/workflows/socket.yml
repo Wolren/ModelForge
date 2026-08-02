@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: socketdev/socket-action@v3
+      - uses: SocketDev/action@v1.3.2
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          mode: firewall-free
+      - name: Install dependencies through firewall
+        run: sfw pip install ruff
