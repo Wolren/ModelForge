@@ -1,6 +1,6 @@
 <div align="center">
 
-![Model Forge](model_forge/icon.png)
+![Model Forge](docs/logo.png)
 
 # Model Forge
 
